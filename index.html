@@ -2211,7 +2211,8 @@ function exportAllowancesExcel(){
 // ════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{\n  $('f-date').value=new Date().toISOString().substring(0,10);
+document.addEventListener('DOMContentLoaded',()=>{
+  $('f-date').value=new Date().toISOString().substring(0,10);
   renderProjectSelect();
   updateTopbarBadge();
   if(activeProject && !projects.find(p=>p.name===activeProject)) activeProject='';
