@@ -1717,6 +1717,8 @@ async function pushAllToSheet(){
   setSyncStatus('syncing');
   showToast('⬆️ Pushing all data to Sheets...','');
   try{
+    // Push project list
+    await postToSheet({action:'save_projects', projects: projects.map(p=>({name:p.name, color:p.color||''}))});
     // Push transactions
     await postToSheet({action:'bulk', project:activeProject, rows:tx||[]});
     // Push customer accounting
@@ -2218,11 +2220,35 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(activeProject && !projects.find(p=>p.name===activeProject)) activeProject='';
   renderDashboard();
   // Auto-load from Sheets on startup if connected
-  if(SHEET_URL && activeProject){
+  if(SHEET_URL){
     setSyncStatus('syncing');
-    loadFromSheet(activeProject).then(()=>{ startAutoSync(); });
-  } else if(SHEET_URL){
-    setSyncStatus('live');
+    // First load project list, then transactions
+    fetch(`${SHEET_URL}?type=projects&_=${Date.now()}`)
+      .then(r=>r.json())
+      .then(d=>{
+        if(d.status==='ok' && d.projects && d.projects.length){
+          // Merge remote projects with local (keep local transactions/customer data)
+          d.projects.forEach(rp=>{
+            if(!projects.find(p=>p.name===rp.name)){
+              projects.push({name:rp.name, color:rp.color||'', transactions:[], customer:{contract:0,changeOrders:[],draws:[],billables:[],allowances:[]}});
+            }
+          });
+          saveProjects();
+          renderProjectSelect();
+          // Set first project active if none selected
+          if(!activeProject && projects.length){
+            activeProject = projects[0].name;
+            localStorage.setItem('wc_active', activeProject);
+            updateTopbarBadge();
+          }
+        }
+        if(activeProject){
+          loadFromSheet(activeProject).then(()=>{ startAutoSync(); });
+        } else {
+          setSyncStatus('live');
+        }
+      })
+      .catch(()=>{ if(activeProject) loadFromSheet(activeProject); });
   }
 });
 </script>
