@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -36,6 +37,24 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// Load jsPDF with fallback
+(function(){
+  function loadScript(src, cb){
+    var s=document.createElement('script');
+    s.src=src;
+    s.onload=cb;
+    s.onerror=function(){
+      // fallback to cdnjs
+      var s2=document.createElement('script');
+      s2.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  }
+  loadScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
+})();
+</script>
 <style>
 :root{
   --bg:#f0f2f5;--surface:#fff;--card:#f7f8fa;--border:#dde1e8;
@@ -440,6 +459,8 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
     <div class="nav-item" onclick="showView('breakdown')" id="nav-breakdown"><span class="nav-icon">🔍</span> Breakdown</div>
     <div class="nav-item" onclick="showView('report')" id="nav-report"><span class="nav-icon">📄</span> Report</div>
     <div class="nav-item" onclick="showView('customer')" id="nav-customer"><span class="nav-icon">💼</span> Customer Accounting</div>
+    <div class="nav-item" onclick="showView('permits')" id="nav-permits"><span class="nav-icon">📋</span> Permits</div>
+    <div class="nav-item" onclick="showView('schedule')" id="nav-schedule"><span class="nav-icon">📅</span> Schedule / Gantt</div>
     <div class="nav-sec" style="margin-top:6px">General</div>
     <div class="nav-item" onclick="showView('projects')" id="nav-projects"><span class="nav-icon">🏗️</span> All Projects</div>
     <div class="nav-item" onclick="showView('setup')" id="nav-setup"><span class="nav-icon">⚙️</span> Google Sheets</div>
@@ -483,6 +504,20 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
         <div class="dk"><div class="dk-label">💸 Total Paid Out</div><div class="dk-value red" id="d-debits">$0</div><div class="dk-sub" id="d-debits-n">0 expenses</div></div>
         <div class="dk"><div class="dk-label">📊 Net Balance</div><div class="dk-value navy" id="d-balance">$0</div><div class="dk-sub">received − paid</div></div>
         <div class="dk"><div class="dk-label">📋 Total Contract Value</div><div class="dk-value blue" id="d-contract">$0</div><div class="dk-sub" id="d-contract-sub">See Customer Accounting</div></div>
+      </div>
+
+      <!-- Address banner -->
+      <div id="d-address-bar" style="display:none;background:var(--navy-faint);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:0.78rem;color:var(--navy2);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span style="font-size:1rem;">📍</span>
+          <span id="d-address-text" style="font-weight:600;"></span>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <span style="background:#dcfce7;color:#166534;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;" id="d-p-approved">✅ 0 Approved</span>
+          <span style="background:#fef9c3;color:#854d0e;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;" id="d-p-pending">⏳ 0 Pending</span>
+          <span style="background:#f1f5f9;color:#475569;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;" id="d-p-closed">🔒 0 Closed</span>
+          <span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;" id="d-p-rejected">❌ 0 Rejected</span>
+        </div>
       </div>
 
       <!-- Progress bars -->
@@ -774,6 +809,171 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
       </div>
     </div>
 
+    <!-- ══ PERMITS ══ -->
+    <div class="view" id="view-permits">
+
+      <!-- KPI bar -->
+      <div class="dash-kpis" style="grid-template-columns:repeat(4,1fr);" id="permit-kpis">
+        <div class="dk"><div class="dk-label">📋 Total Permits</div><div class="dk-value navy" id="pk-total">0</div></div>
+        <div class="dk"><div class="dk-label">✅ Approved</div><div class="dk-value green" id="pk-approved">0</div></div>
+        <div class="dk"><div class="dk-label">⏳ Pending</div><div class="dk-value" style="color:#f59e0b" id="pk-pending">0</div></div>
+        <div class="dk"><div class="dk-label">❌ Rejected</div><div class="dk-value red" id="pk-rejected">0</div></div>
+      </div>
+
+      <div class="card" style="margin-top:0">
+        <div class="card-header">
+          <div class="card-title">📋 Project Permits</div>
+          <button class="btn btn-primary btn-sm" onclick="toggleSection('permit-form')">＋ Add Permit</button>
+        </div>
+
+        <!-- Add Permit Form -->
+        <div id="permit-form" style="display:none;padding:18px;border-top:1px solid var(--border);background:var(--blue-faint);">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Permit Type *</label>
+              <input list="dl-permit-type" class="form-input" id="permit-type" placeholder="Select or type...">
+              <datalist id="dl-permit-type">
+                <option value="Building">
+                <option value="Mechanical">
+                <option value="Electrical">
+                <option value="Plumbing">
+                <option value="Roofing">
+                <option value="Demolition">
+                <option value="Fire Alarm">
+                <option value="Fire Sprinkler">
+                <option value="Structural">
+                <option value="Zoning">
+                <option value="Special Inspector">
+              </datalist>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <input list="dl-permit-status" class="form-input" id="permit-status" placeholder="Pending">
+              <datalist id="dl-permit-status">
+                <option value="Pending">
+                <option value="In Review">
+                <option value="Approved">
+                <option value="Rejected">
+                <option value="Expired">
+                <option value="Closed">
+              </datalist>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Permit Number</label>
+              <input class="form-input" id="permit-number" placeholder="e.g. B-2024-001234">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Process Number</label>
+              <input class="form-input" id="permit-process" placeholder="e.g. PRO-2024-5678">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date Applied</label>
+              <input type="date" class="form-input" id="permit-date-applied">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date Approved / Issued</label>
+              <input type="date" class="form-input" id="permit-date-issued">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expiration Date</label>
+              <input type="date" class="form-input" id="permit-date-expires">
+            </div>
+            <div class="form-group" style="grid-column:span 2">
+              <label class="form-label">📍 Property Address</label>
+              <input class="form-input" id="permit-address" placeholder="e.g. 245 NW 12th St, Miami, FL 33128">
+            </div>
+            <div class="form-group" style="grid-column:span 2">
+              <label class="form-label">Notes</label>
+              <input class="form-input" id="permit-notes" placeholder="Additional notes...">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="btn btn-primary btn-sm" onclick="addPermit()">✓ Save Permit</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleSection('permit-form')">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Permits Table -->
+        <div class="table-wrap">
+          <table id="permits-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Permit #</th>
+                <th>Process #</th>
+                <th>Status</th>
+                <th>Address</th>
+                <th>Applied</th>
+                <th>Issued</th>
+                <th>Expires</th>
+                <th>Notes</th>
+                <th class="ns">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="permits-tbody">
+              <tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">No permits yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SCHEDULE / GANTT ══ -->
+    <div class="view" id="view-schedule">
+
+      <!-- KPIs -->
+      <div class="dash-kpis" style="grid-template-columns:repeat(5,1fr);">
+        <div class="dk"><div class="dk-label">📝 Total Tasks</div><div class="dk-value navy" id="sch-total">0</div></div>
+        <div class="dk"><div class="dk-label">✅ Completed</div><div class="dk-value green" id="sch-done">0</div></div>
+        <div class="dk"><div class="dk-label">🔵 In Progress</div><div class="dk-value blue" id="sch-inprog">0</div></div>
+        <div class="dk"><div class="dk-label">⏳ Not Started</div><div class="dk-value" style="color:var(--muted)" id="sch-notstarted">0</div></div>
+        <div class="dk"><div class="dk-label">🔴 Delayed</div><div class="dk-value red" id="sch-delayed">0</div></div>
+      </div>
+
+      <div class="card" style="margin-top:0">
+        <div class="card-header">
+          <div class="card-title">📅 Project Schedule</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary btn-sm" onclick="openTaskModal()">＋ Add Task</button>
+            <button class="btn btn-outline btn-sm" onclick="exportScheduleExcel()">⬇ Excel</button>
+            <button class="btn btn-outline btn-sm" style="color:var(--red);border-color:var(--red);" onclick="exportSchedulePDF()">⬇ PDF</button>
+          </div>
+        </div>
+
+        <!-- Gantt Chart -->
+        <div style="padding:0 0 0 0;" id="gantt-wrap">
+          <div class="gantt-empty-state" id="gantt-empty" style="padding:40px;text-align:center;color:var(--muted);">
+            <div style="font-size:2.5rem;opacity:0.3;margin-bottom:10px;">📅</div>
+            No tasks yet. Click "+ Add Task" to build your schedule.
+          </div>
+          <div id="gantt-chart" style="display:none;overflow-x:auto;"></div>
+        </div>
+
+        <!-- Task Table -->
+        <div class="table-wrap" style="border-top:1px solid var(--border);">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:30px">#</th>
+                <th>Activity</th>
+                <th>Category</th>
+                <th>Depends On</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Days</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th class="ns">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="schedule-tbody">
+              <tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">No tasks yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ══ IMPORT ══ -->
     <div class="view" id="view-import">
       <div class="card">
@@ -793,7 +993,7 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
             <div style="font-size:0.8rem;color:var(--muted);">Click to select or drag & drop your Excel file (.xlsx)<br>
             <span style="font-size:0.65rem;">Expected columns: Nro, Date, Pyee/Payee, Debit, Credit, Category, Check, Bank Account, Payment method, Notas/Notes</span></div>
           </div>
-          <input type="file" id="file-input" accept=".xlsx,.xls" style="display:none" onchange="handleFileUpload(event)">
+          <input type="file" id="file-input" accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="handleFileUpload(event)">
         </div>
       </div>
     </div>
@@ -1039,6 +1239,72 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
 </div>
 
 <!-- Bulk delete modal -->
+<div class="modal-overlay" id="task-modal" onclick="if(event.target===this)closeModal('task-modal')">
+  <div class="modal" style="max-width:620px;width:95%;">
+    <div class="modal-title" id="task-modal-title">📅 Add Task</div>
+    <div class="form-grid">
+      <div class="form-group" style="grid-column:span 2">
+        <label class="form-label">Activity Description *</label>
+        <input class="form-input" id="task-desc" placeholder="e.g. Foundation work, Framing, Electrical rough-in...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <input list="dl-task-cat" class="form-input" id="task-cat" placeholder="e.g. Structural">
+        <datalist id="dl-task-cat">
+          <option value="Site Prep"><option value="Foundation"><option value="Framing">
+          <option value="Roofing"><option value="Plumbing"><option value="Electrical">
+          <option value="Mechanical"><option value="Insulation"><option value="Drywall">
+          <option value="Flooring"><option value="Painting"><option value="Finishes">
+          <option value="Landscaping"><option value="Inspection"><option value="Permits">
+          <option value="Cleanup"><option value="Milestones">
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Depends On (Task #)</label>
+        <input class="form-input" id="task-depends" placeholder="e.g. 1, 3 (comma separated)" type="text">
+      </div>
+      <!-- Date row: Start + Days OR End — auto-calculate -->
+      <div class="form-group">
+        <label class="form-label">Start Date *</label>
+        <input type="date" class="form-input" id="task-start" oninput="taskAutoCalc('start')">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Working Days (Mon–Sat) *</label>
+        <input type="number" class="form-input" id="task-days" placeholder="e.g. 10" min="1" oninput="taskAutoCalc('days')">
+      </div>
+      <div class="form-group">
+        <label class="form-label">End Date (auto or manual)</label>
+        <input type="date" class="form-input" id="task-end" oninput="taskAutoCalc('end')">
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;">
+        <div style="background:var(--navy-faint);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:0.72rem;color:var(--navy2);width:100%;">
+          📅 <span id="task-days-display" style="font-weight:700;">—</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <input list="dl-task-status" class="form-input" id="task-status" placeholder="Not Started">
+        <datalist id="dl-task-status">
+          <option value="Not Started"><option value="In Progress">
+          <option value="Completed"><option value="Delayed"><option value="On Hold">
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Progress (0-100%)</label>
+        <input type="number" class="form-input" id="task-progress" placeholder="0" min="0" max="100">
+      </div>
+      <div class="form-group" style="grid-column:span 2">
+        <label class="form-label">Notes</label>
+        <input class="form-input" id="task-notes" placeholder="Additional notes...">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('task-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask()" id="task-save-btn">✓ Save Task</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="vendor-modal" onclick="if(event.target===this)closeModal('vendor-modal')">
   <div class="modal" style="max-width:700px;width:95%;">
     <div class="modal-title" id="vendor-modal-title">Vendor Detail</div>
@@ -1215,7 +1481,7 @@ function updateTopbarBadge(){
 // ════════════════════════════════════════════
 // VIEWS
 // ════════════════════════════════════════════
-const viewTitles = { projects:'All Projects', dashboard:'Dashboard', transactions:'Transactions', breakdown:'Breakdown', report:'Report', setup:'Google Sheets Setup', import:'Import Excel', customer:'Customer Accounting' };
+const viewTitles = { projects:'All Projects', dashboard:'Dashboard', transactions:'Transactions', breakdown:'Breakdown', report:'Report', setup:'Google Sheets Setup', import:'Import Excel', customer:'Customer Accounting', permits:'Permits', schedule:'Schedule / Gantt' };
 const viewActions = {
   report: `<button class="btn btn-outline btn-sm" onclick="window.print()">🖨 Print</button><button class="btn btn-blue btn-sm" onclick="exportExcel()">⬇ Excel</button>`,
   customer: `<button class="btn btn-blue btn-sm" onclick="exportAllowancesExcel()">⬇ Export Excel</button>`,
@@ -1234,6 +1500,8 @@ function showView(v){
   if(v==='report') renderReport();
   if(v==='projects') renderProjectsGrid();
   if(v==='customer'){ $('co-date').value=new Date().toISOString().substring(0,10); $('draw-date').value=new Date().toISOString().substring(0,10); $('bill-date').value=new Date().toISOString().substring(0,10); renderCustomerAccounting(); }
+  if(v==='permits'){ renderPermits(); }
+  if(v==='schedule'){ renderSchedule(); }
   if(v==='setup'){ if(SHEET_URL) $('sheets-url-input').value=SHEET_URL; checkConnBanner(); }
 }
 
@@ -1262,6 +1530,19 @@ function renderDashboard(){
   const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
   if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
+
+  // Address bar from permits
+  const permits = (projects.find(p=>p.name===activeProject)||{}).permits || [];
+  const addrPermit = permits.find(p=>p.address);
+  const addrBar = $('d-address-bar');
+  if(permits.length || (addrPermit && addrPermit.address)){
+    if(addrPermit) $('d-address-text').textContent = addrPermit.address;
+    $('d-p-approved').textContent = `✅ ${permits.filter(p=>p.status==='Approved').length} Approved`;
+    $('d-p-pending').textContent = `⏳ ${permits.filter(p=>p.status==='Pending'||p.status==='In Review').length} Pending`;
+    $('d-p-closed').textContent = `🔒 ${permits.filter(p=>p.status==='Closed').length} Closed`;
+    $('d-p-rejected').textContent = `❌ ${permits.filter(p=>p.status==='Rejected'||p.status==='Expired').length} Rejected`;
+    addrBar.style.display = 'block';
+  } else { addrBar.style.display = 'none'; }
 
   // ── Progress bar: Spent vs Contract ──
   const spentPct = totalContractVal>0 ? Math.min((debits/totalContractVal)*100, 100) : 0;
@@ -1732,12 +2013,15 @@ async function pushAllToSheet(){
       const allowA = (ca.allowances||[]).reduce((s,a)=>s+(parseFloat(a.actual)||0),0);
       const billT = (ca.billables||[]).reduce((s,b)=>s+(b.amount||0),0);
       const contractValue = (ca.contract||0) + coTotal + (allowB - allowA) + billT;
-      return {name:p.name, color:p.color||'', contractValue};
+      return {name:p.name, color:p.color||'', contractValue, permitCount:(p.permits||[]).length};
     })});
     // Push transactions
     await postToSheet({action:'bulk', project:activeProject, rows:tx||[]});
     // Push customer accounting
     if(ca) await postToSheet({action:'save_customer', project:activeProject, customer:ca});
+    // Push permits
+    const permits = getPermits();
+    if(permits) await postToSheet({action:'save_permits', project:activeProject, permits});
     setSyncStatus('live');
     showToast(`✅ Pushed ${(tx||[]).length} transactions + Customer Accounting to Sheets!`,'success');
   }catch(e){
@@ -1786,6 +2070,88 @@ function showVendorDetail(name){
       </table>
     </div>`;
   openModal('vendor-modal');
+}
+
+// ════════════════════════════════════════════
+// PERMITS
+// ════════════════════════════════════════════
+function getPermits(){
+  const proj = projects.find(p=>p.name===activeProject);
+  if(!proj) return null;
+  if(!proj.permits) proj.permits = [];
+  return proj.permits;
+}
+function savePermits(){ saveProjects(); }
+
+function renderPermits(){
+  const permits = getPermits();
+  if(!permits){ $('permits-tbody').innerHTML='<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted);">Select a project first.</td></tr>'; return; }
+  $('pk-total').textContent = permits.length;
+  $('pk-approved').textContent = permits.filter(p=>p.status==='Approved').length;
+  $('pk-pending').textContent = permits.filter(p=>p.status==='Pending'||p.status==='In Review').length;
+  $('pk-rejected').textContent = permits.filter(p=>p.status==='Rejected'||p.status==='Expired').length;
+  if(!permits.length){ $('permits-tbody').innerHTML='<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--muted);">No permits yet. Click "+ Add Permit" to start.</td></tr>'; return; }
+  const statusColor = s => s==='Approved'?'tag-pay':s==='Rejected'||s==='Expired'?'tag-sub':s==='In Review'?'tag-prof':'tag-plan';
+  $('permits-tbody').innerHTML = permits.map((p,i)=>`
+    <tr id="permit-row-${i}">
+      <td style="font-weight:700;color:var(--navy)">${p.type||'—'}</td>
+      <td style="font-family:monospace;font-size:0.72rem">${p.number||'—'}</td>
+      <td style="font-family:monospace;font-size:0.72rem">${p.process||'—'}</td>
+      <td><span class="tag ${statusColor(p.status)}">${p.status||'Pending'}</span></td>
+      <td style="font-size:0.7rem">${p.address||'—'}</td>
+      <td>${fmtDate(p.dateApplied)||'—'}</td>
+      <td>${fmtDate(p.dateIssued)||'—'}</td>
+      <td style="color:${isExpiringSoon(p.dateExpires)?'var(--red)':''}">${fmtDate(p.dateExpires)||'—'}</td>
+      <td style="font-size:0.7rem;color:var(--muted)">${p.notes||'—'}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="editPermit(${i})" style="padding:3px 7px;">✎</button>
+        <button class="btn btn-ghost btn-sm" onclick="deletePermit(${i})" style="color:var(--red);padding:3px 7px;">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+function isExpiringSoon(dateStr){
+  if(!dateStr) return false;
+  const diff = (new Date(dateStr) - new Date()) / (1000*60*60*24);
+  return diff >= 0 && diff <= 30;
+}
+
+function addPermit(){
+  const permits = getPermits(); if(!permits){ showToast('Select a project first','error'); return; }
+  const type = $('permit-type').value.trim();
+  if(!type){ showToast('Permit type is required','error'); return; }
+  permits.push({ type, status:$('permit-status').value.trim()||'Pending', number:$('permit-number').value.trim(), process:$('permit-process').value.trim(), address:$('permit-address').value.trim(), dateApplied:$('permit-date-applied').value, dateIssued:$('permit-date-issued').value, dateExpires:$('permit-date-expires').value, notes:$('permit-notes').value.trim() });
+  savePermits();
+  ['permit-type','permit-status','permit-number','permit-process','permit-address','permit-date-applied','permit-date-issued','permit-date-expires','permit-notes'].forEach(id=>$(id).value='');
+  toggleSection('permit-form');
+  renderPermits();
+  showToast('✓ Permit added!','success');
+}
+
+function deletePermit(i){ const permits=getPermits(); permits.splice(i,1); savePermits(); renderPermits(); showToast('Permit deleted','success'); }
+
+function editPermit(i){
+  const permits=getPermits(); const p=permits[i]; if(!p) return;
+  document.getElementById(`permit-row-${i}`).innerHTML=`
+    <td><input class="form-input" id="ep-type-${i}" value="${p.type||''}" style="min-width:110px"></td>
+    <td><input class="form-input" id="ep-num-${i}" value="${p.number||''}" style="min-width:110px"></td>
+    <td><input class="form-input" id="ep-proc-${i}" value="${p.process||''}" style="min-width:110px"></td>
+    <td><input list="dl-permit-status" class="form-input" id="ep-status-${i}" value="${p.status||''}" style="min-width:90px"></td>
+    <td><input type="date" class="form-input" id="ep-da-${i}" value="${p.dateApplied||''}"></td>
+    <td><input type="date" class="form-input" id="ep-di-${i}" value="${p.dateIssued||''}"></td>
+    <td><input type="date" class="form-input" id="ep-de-${i}" value="${p.dateExpires||''}"></td>
+    <td><input class="form-input" id="ep-addr-${i}" value="${p.address||''}" style="min-width:180px"></td>
+    <td><input class="form-input" id="ep-notes-${i}" value="${p.notes||''}" style="min-width:120px"></td>
+    <td>
+      <button class="btn btn-primary btn-sm" onclick="savePermit(${i})" style="padding:3px 7px;">✓</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderPermits()" style="padding:3px 7px;">✕</button>
+    </td>`;
+}
+
+function savePermit(i){
+  const permits=getPermits();
+  permits[i]={ type:$(`ep-type-${i}`).value.trim(), number:$(`ep-num-${i}`).value.trim(), process:$(`ep-proc-${i}`).value.trim(), status:$(`ep-status-${i}`).value.trim(), address:$(`ep-addr-${i}`).value.trim(), dateApplied:$(`ep-da-${i}`).value, dateIssued:$(`ep-di-${i}`).value, dateExpires:$(`ep-de-${i}`).value, notes:$(`ep-notes-${i}`).value.trim() };
+  savePermits(); renderPermits(); showToast('✓ Permit updated!','success');
 }
 
 // ── AUTO-SYNC: pull from Sheets every 60 seconds, push every 30 seconds ──
@@ -1900,30 +2266,39 @@ async function processFile(file){
   const reader=new FileReader();
   reader.onload=async function(e){
     try{
-      const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true});
+      const wb=XLSX.read(e.target.result,{type:'binary',cellDates:true,cellNF:false,raw:false});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const raw=XLSX.utils.sheet_to_json(ws,{header:1});
+      const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(raw.length<2){ showToast('No data found in file','error'); return; }
+      // Try to detect header row (first row with "date" or "payee" or "nro")
+      let startRow=1;
+      const h=(raw[0]||[]).map(v=>String(v).toLowerCase());
+      if(!h.some(v=>v.includes('date')||v.includes('payee')||v.includes('pyee')||v.includes('nro'))){
+        startRow=0; // no header, start from row 0
+      }
       const imported=[];
-      for(let i=1;i<raw.length;i++){
+      for(let i=startRow;i<raw.length;i++){
         const r=raw[i];
         if(!r||!r.some(v=>v!=null&&v!=='')) continue;
         let ds='';
         if(r[1] instanceof Date) ds=r[1].toISOString().substring(0,10);
-        else if(typeof r[1]==='string') ds=r[1].substring(0,10);
-        else if(typeof r[1]==='number'){ const d=XLSX.SSF.parse_date_code(r[1]); ds=`${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`; }
-        imported.push({_id:Date.now()+i,nro:r[0]||i,date:ds,payee:r[2]||'',debit:r[3]||null,credit:r[4]||null,category:r[5]||'',check:r[6]||'',bank:String(r[7]||'').trim(),payment:String(r[8]||'').trim(),notes:r[9]||''});
+        else if(typeof r[1]==='string'&&r[1].trim()) ds=r[1].trim().substring(0,10);
+        else if(typeof r[1]==='number'){ try{ const d=XLSX.SSF.parse_date_code(r[1]); ds=`${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`; }catch(ex){} }
+        const debit = r[3]!==''&&r[3]!=null ? parseFloat(String(r[3]).replace(/[$,]/g,''))||null : null;
+        const credit = r[4]!==''&&r[4]!=null ? parseFloat(String(r[4]).replace(/[$,]/g,''))||null : null;
+        imported.push({_id:Date.now()+i,nro:r[0]||i,date:ds,payee:String(r[2]||'').trim(),debit,credit,category:String(r[5]||'').trim(),check:String(r[6]||'').trim(),bank:String(r[7]||'').trim(),payment:String(r[8]||'').trim(),notes:String(r[9]||'').trim()});
       }
-      if(!imported.length){ showToast('No data found in file','error'); return; }
-      let pName=$('import-project-name').value.trim()||file.name.replace(/\.xlsx?$/i,'');
+      if(!imported.length){ showToast('No data rows found in file','error'); return; }
+      let pName=$('import-project-name').value.trim()||file.name.replace(/\\.xlsx?$/i,'');
       let proj=projects.find(p=>p.name===pName);
-      if(!proj){ proj={name:pName,transactions:[]}; projects.push(proj); }
+      if(!proj){ proj={name:pName,transactions:[],customer:{contract:0,changeOrders:[],draws:[],billables:[],allowances:[]}}; projects.push(proj); }
       proj.transactions=imported;
       saveProjects();
       switchProject(pName);
       showToast(`✓ Imported ${imported.length} entries into "${pName}"!`,'success');
       if(SHEET_URL){ setSyncStatus('syncing'); try{ await postToSheet({action:'bulk',project:pName,rows:imported}); setSyncStatus('live'); }catch(ex){setSyncStatus('off');} }
       showView('dashboard');
-    }catch(err){ showToast('Error reading file: '+err.message,'error'); }
+    }catch(err){ showToast('Error reading file: '+err.message,'error'); console.error(err); }
   };
   reader.readAsBinaryString(file);
 }
@@ -2023,7 +2398,7 @@ function renderCustomerAccounting(){
   $('allow-tbody').innerHTML = ca.allowances.length ? ca.allowances.map((a,i)=>{
     const diff = (a.budget||0)-(a.actual||0);
     return `<tr id="allow-row-${i}">
-      <td style="font-weight:600">${a.desc||'—'}</td>
+      <td style="font-weight:600">${a.desc||a.item||'—'}</td>
       <td>${fmt(a.budget)}</td>
       <td>${a.actual!=null&&a.actual!==''?fmt(a.actual):'<span style="color:var(--muted)">—</span>'}</td>
       <td style="font-weight:700;color:${diff>=0?'var(--green)':'var(--red)'}">${a.actual!=null&&a.actual!==''?(diff>=0?'+':'')+fmt(diff):'—'}</td>
@@ -2130,7 +2505,7 @@ function editAllowance(i){
   const ca=getCA(); const a=ca.allowances[i]; if(!a) return;
   const row=$('allow-row-'+i); if(!row) return;
   row.innerHTML=`
-    <td><input class="form-input" id="eal-desc-${i}" value="${a.desc||''}" style="width:200px;padding:4px 6px;"></td>
+    <td><input class="form-input" id="eal-desc-${i}" value="${a.desc||a.item||''}" style="width:200px;padding:4px 6px;"></td>
     <td><input type="number" class="form-input" id="eal-budget-${i}" value="${a.budget||''}" step="0.01" style="width:100px;padding:4px 6px;"></td>
     <td><input type="number" class="form-input" id="eal-actual-${i}" value="${a.actual!=null?a.actual:''}" step="0.01" placeholder="—" style="width:100px;padding:4px 6px;"></td>
     <td>—</td>
@@ -2193,7 +2568,7 @@ function exportAllowancesExcel(){
 
   // Allowances sheet
   const aData=[['Item / Description','Allowance Allocated','Real Cost','Difference'],
-    ...ca.allowances.map(a=>{ const d=(a.budget||0)-(a.actual||0); return [a.desc,a.budget||0,a.actual||'',a.actual!=null?d:'']; }),
+    ...ca.allowances.map(a=>{ const d=(a.budget||0)-(a.actual||0); const name=a.desc||a.item||'—'; return [name,a.budget||0,a.actual||'',a.actual!=null?d:'']; }),
     ['TOTAL', ca.allowances.reduce((s,a)=>s+(a.budget||0),0), ca.allowances.reduce((s,a)=>s+(a.actual||0),0), ca.allowances.reduce((s,a)=>s+(a.budget||0),0)-ca.allowances.reduce((s,a)=>s+(a.actual||0),0)]
   ];
   const ws1=XLSX.utils.aoa_to_sheet(aData);
@@ -2286,6 +2661,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     <span class="mn-icon">💼</span>
     <span>Customer</span>
   </button>
+  <button class="mn-item" onclick="mobileNav('schedule')" id="mn-schedule"><span class="mn-icon">📅</span><span>Schedule</span></button>
+  <button class="mn-item" onclick="mobileNav('permits')" id="mn-permits">
+    <span class="mn-icon">📋</span>
+    <span>Permits</span>
+  </button>
   <button class="mn-item" onclick="mobileNav('projects')" id="mn-projects">
     <span class="mn-icon">🏗️</span>
     <span>Projects</span>
@@ -2302,6 +2682,852 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 <!-- FAB — Add Transaction -->
 <button class="fab" style="display:none" onclick="toggleAddForm()" title="Add Transaction">＋</button>
+
+<script>
+// ══════════════════════════════════════════════
+//  SCHEDULE / GANTT  —  full implementation
+// ══════════════════════════════════════════════
+
+let editingTaskIdx = null;
+
+// ══ WORKING-DAY HELPERS (Mon=1 … Sat=6, skip Sun=0) ════════════════════════
+
+// Add N working days (Mon-Sat) to a date string, returns ISO date string
+function addWorkDays(dateStr, n){
+  const d = new Date(dateStr + 'T00:00:00');
+  let added = 0;
+  while(added < n){
+    d.setDate(d.getDate() + 1);
+    if(d.getDay() !== 0) added++; // skip Sunday
+  }
+  return d.toISOString().split('T')[0];
+}
+
+// Count working days between two ISO date strings (inclusive start, inclusive end)
+function countWorkDays(startStr, endStr){
+  if(!startStr || !endStr) return 0;
+  const s = new Date(startStr + 'T00:00:00');
+  const e = new Date(endStr   + 'T00:00:00');
+  if(e < s) return 0;
+  let count = 0;
+  const cur = new Date(s);
+  while(cur <= e){
+    if(cur.getDay() !== 0) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+// Advance a date to the next working day if it falls on Sunday
+function skipSunday(dateStr){
+  const d = new Date(dateStr + 'T00:00:00');
+  if(d.getDay() === 0) d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
+}
+
+function getSchedule(){
+  const proj = projects.find(x=>x.name===activeProject);
+  if(!proj) return [];
+  if(!proj.schedule) proj.schedule = [];
+  return proj.schedule;
+}
+function setSchedule(arr){
+  const proj = projects.find(x=>x.name===activeProject);
+  if(proj){ proj.schedule = arr; saveProjects(); }
+}
+function daysBetween(a,b){
+  return Math.round((new Date(b)-new Date(a))/(1000*60*60*24));
+}
+function fmtD(s){ if(!s) return '—'; const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}); }
+
+// ── Modal live auto-calc ──────────────────────────────────────────────────
+// Called whenever start, days, or end changes in the modal
+function taskAutoCalc(changed){
+  const startEl = document.getElementById('task-start');
+  const daysEl  = document.getElementById('task-days');
+  const endEl   = document.getElementById('task-end');
+  const dispEl  = document.getElementById('task-days-display');
+
+  let start = startEl.value;
+  let days  = parseInt(daysEl.value);
+  let end   = endEl.value;
+
+  if(changed === 'start' || changed === 'days'){
+    // start + days → compute end
+    if(start && days >= 1){
+      start = skipSunday(start); // make sure start is not Sunday
+      startEl.value = start;
+      const computed = addWorkDays(start, days - 1); // days is inclusive
+      endEl.value = computed;
+      end = computed;
+    }
+  } else if(changed === 'end'){
+    // end changed manually → recount working days
+    if(start && end && end >= start){
+      const wd = countWorkDays(start, end);
+      daysEl.value = wd;
+      days = wd;
+    }
+  }
+
+  // Update display pill
+  if(start && end && end >= start){
+    const wd = countWorkDays(start, end);
+    const calDays = daysBetween(start, end) + 1;
+    dispEl.textContent = wd + ' working days  (' + calDays + ' calendar days)';
+  } else {
+    dispEl.textContent = '—';
+  }
+}
+
+// ── Dependency cascade ────────────────────────────────────────────────────
+function cascadeDependencies(schedule, changedIdx){
+  const changed = schedule[changedIdx];
+  if(!changed.end) return;
+  schedule.forEach((t,i)=>{
+    if(i===changedIdx) return;
+    const deps = parseDeps(t.depends);
+    if(deps.includes(changedIdx+1)){
+      const wd = t.workDays || countWorkDays(t.start, t.end) || 1;
+      const newStart = skipSunday(addWorkDays(changed.end, 1));
+      const newEnd   = addWorkDays(newStart, wd - 1);
+      if(t.start !== newStart){
+        t.start    = newStart;
+        t.end      = newEnd;
+        t.workDays = wd;
+        cascadeDependencies(schedule, i);
+      }
+    }
+  });
+}
+function parseDeps(depsStr){
+  if(!depsStr) return [];
+  return depsStr.toString().split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
+}
+
+// ── Open modal ────────────────────────────────────────────────────────────
+function openTaskModal(idx){
+  if(!activeProject){ showToast('Select a project first','error'); return; }
+  editingTaskIdx = (idx===undefined) ? null : idx;
+  const schedule = getSchedule();
+  document.getElementById('task-modal-title').textContent = editingTaskIdx===null ? '📅 Add Task' : '✏️ Edit Task';
+  document.getElementById('task-save-btn').textContent    = editingTaskIdx===null ? '✓ Save Task'  : '✓ Update Task';
+
+  if(editingTaskIdx !== null){
+    const t = schedule[editingTaskIdx];
+    document.getElementById('task-desc').value     = t.desc    || '';
+    document.getElementById('task-cat').value      = t.cat     || '';
+    document.getElementById('task-depends').value  = t.depends || '';
+    document.getElementById('task-start').value    = t.start   || '';
+    document.getElementById('task-end').value      = t.end     || '';
+    document.getElementById('task-days').value     = t.workDays || (t.start && t.end ? countWorkDays(t.start,t.end) : '');
+    document.getElementById('task-status').value   = t.status  || 'Not Started';
+    document.getElementById('task-progress').value = t.progress !== undefined ? t.progress : 0;
+    document.getElementById('task-notes').value    = t.notes   || '';
+    taskAutoCalc('end'); // refresh display
+  } else {
+    ['task-desc','task-cat','task-depends','task-start','task-end','task-days','task-notes'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('task-status').value   = 'Not Started';
+    document.getElementById('task-progress').value = '0';
+    document.getElementById('task-days-display').textContent = '—';
+  }
+  document.getElementById('task-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('task-desc').focus(),100);
+}
+
+// ── Save task ─────────────────────────────────────────────────────────────
+function saveTask(){
+  if(!activeProject){ showToast('Select a project first','error'); closeModal('task-modal'); return; }
+  const desc  = document.getElementById('task-desc').value.trim();
+  let   start = document.getElementById('task-start').value;
+  const days  = parseInt(document.getElementById('task-days').value);
+  let   end   = document.getElementById('task-end').value;
+
+  if(!desc)  { showToast('Activity description is required','error'); return; }
+  if(!start) { showToast('Start date is required','error'); return; }
+
+  // If days given but no end, compute it
+  if(days >= 1 && !end){
+    start = skipSunday(start);
+    end   = addWorkDays(start, days - 1);
+    document.getElementById('task-end').value = end;
+    document.getElementById('task-start').value = start;
+  }
+  if(!end){ showToast('Enter working days or an end date','error'); return; }
+  if(end < start){ showToast('End date must be after start date','error'); return; }
+
+  // Recalculate workDays from final start/end
+  const workDays = countWorkDays(start, end);
+
+  const task = {
+    desc,
+    cat:      document.getElementById('task-cat').value.trim(),
+    depends:  document.getElementById('task-depends').value.trim(),
+    start, end, workDays,
+    status:   document.getElementById('task-status').value.trim() || 'Not Started',
+    progress: parseInt(document.getElementById('task-progress').value)||0,
+    notes:    document.getElementById('task-notes').value.trim()
+  };
+
+  const schedule = getSchedule();
+  if(editingTaskIdx !== null){
+    schedule[editingTaskIdx] = task;
+    cascadeDependencies(schedule, editingTaskIdx);
+    showToast('Task updated — dependencies cascaded ✓','success');
+  } else {
+    schedule.push(task);
+    showToast('Task added ✓','success');
+  }
+  setSchedule(schedule);
+  closeModal('task-modal');
+  renderSchedule();
+}
+
+// ── Delete task ───────────────────────────────────────────────────────────
+function deleteTask(idx){
+  if(!confirm('Delete this task?')) return;
+  const schedule = getSchedule();
+  schedule.splice(idx,1);
+  setSchedule(schedule);
+  renderSchedule();
+  showToast('Task deleted');
+}
+
+// ── Status helpers ────────────────────────────────────────────────────────
+function taskStatusClass(s){
+  const map = {'Completed':'s-completed','In Progress':'s-inprogress','Delayed':'s-delayed','On Hold':'s-onhold'};
+  return map[s] || 's-notstarted';
+}
+function taskBarColor(s){
+  const map = {'Completed':'#1a5c3a','In Progress':'#2563b0','Delayed':'#c0392b','On Hold':'#92400e'};
+  return map[s] || '#64748b';
+}
+
+// ── KPI render ────────────────────────────────────────────────────────────
+function renderScheduleKpis(schedule){
+  const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=v; };
+  set('sch-total',    schedule.length);
+  set('sch-done',     schedule.filter(t=>t.status==='Completed').length);
+  set('sch-inprog',   schedule.filter(t=>t.status==='In Progress').length);
+  set('sch-notstarted',schedule.filter(t=>t.status==='Not Started'||!t.status).length);
+  set('sch-delayed',  schedule.filter(t=>t.status==='Delayed').length);
+}
+
+// ── Gantt chart render ────────────────────────────────────────────────────
+function renderGantt(schedule){
+  const wrap  = document.getElementById('gantt-chart');
+  const empty = document.getElementById('gantt-empty');
+  if(!wrap) return;
+
+  const valid = schedule.filter(t=>t.start&&t.end);
+  if(!valid.length){
+    wrap.style.display='none';
+    if(empty) empty.style.display='block';
+    return;
+  }
+  wrap.style.display='block';
+  if(empty) empty.style.display='none';
+
+  // ── Date range ──────────────────────────────
+  let minDate = new Date(Math.min(...valid.map(t=>new Date(t.start+'T00:00:00'))));
+  let maxDate = new Date(Math.max(...valid.map(t=>new Date(t.end+'T00:00:00'))));
+  // snap minDate back to Monday of that week
+  while(minDate.getDay() !== 1) minDate.setDate(minDate.getDate()-1);
+  // snap maxDate forward to Saturday of that week
+  while(maxDate.getDay() !== 6) maxDate.setDate(maxDate.getDate()+1);
+
+  // Build flat day list (Mon→Sat only, skip Sundays)
+  const days = []; // {date, dayOfWeek, isToday, isSunday}
+  const today = new Date(); today.setHours(0,0,0,0);
+  {
+    const cur = new Date(minDate);
+    while(cur <= maxDate){
+      const dow = cur.getDay(); // 0=Sun
+      if(dow !== 0){
+        days.push({
+          iso:   cur.toISOString().split('T')[0],
+          dow,
+          isToday: cur.getTime()===today.getTime(),
+          label: cur.getDate().toString()
+        });
+      }
+      cur.setDate(cur.getDate()+1);
+    }
+  }
+
+  // Map iso-date → column index
+  const dateToCol = {};
+  days.forEach((d,i)=>{ dateToCol[d.iso]=i; });
+  const totalCols = days.length;
+
+  // ── Column width ────────────────────────────
+  const LABEL_W = 200;
+  // Aim to fit on screen but have a minimum
+  const DAY_W   = Math.max(22, Math.min(36, Math.floor((window.innerWidth*0.68-LABEL_W)/totalCols)));
+  const chartW  = LABEL_W + totalCols * DAY_W;
+
+  // ── Build week groups for header ─────────────
+  const weeks = [];
+  days.forEach((d,i)=>{
+    if(d.dow === 1 || i===0){
+      // Start a new week group on Monday
+      const wStart = new Date(d.iso+'T00:00:00');
+      const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate()+5); // Sat
+      const label  = wStart.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+                   + ' – '
+                   + wEnd.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'});
+      weeks.push({ label, startCol: i, span: 0 });
+    }
+    weeks[weeks.length-1].span++;
+  });
+
+  // ── Month groups (for top-level row) ────────
+  const months = [];
+  days.forEach((d,i)=>{
+    const dt = new Date(d.iso+'T00:00:00');
+    const key = dt.getFullYear()+'-'+dt.getMonth();
+    if(!months.length || months[months.length-1].key !== key){
+      months.push({ key, label: dt.toLocaleDateString('en-US',{month:'long',year:'numeric'}), startCol:i, span:0 });
+    }
+    months[months.length-1].span++;
+  });
+
+  let html = `<div style="min-width:${chartW}px;font-family:'DM Mono',monospace;font-size:0.65rem;">`;
+
+  // ── HEADER ROW 1: Months ─────────────────────
+  html += `<div style="display:flex;background:#0a1a36;color:#fff;border-bottom:1px solid rgba(255,255,255,0.12);">`;
+  html += `<div style="width:${LABEL_W}px;flex-shrink:0;padding:6px 12px;font-weight:700;font-size:0.6rem;border-right:1px solid rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:0.06em;">Activity</div>`;
+  html += `<div style="display:flex;flex:1;">`;
+  months.forEach(m=>{
+    html += `<div style="width:${m.span*DAY_W}px;flex-shrink:0;padding:5px 8px;font-weight:700;font-size:0.62rem;border-left:1px solid rgba(255,255,255,0.15);text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;overflow:hidden;">${m.label}</div>`;
+  });
+  html += `</div></div>`;
+
+  // ── HEADER ROW 2: Weeks ──────────────────────
+  html += `<div style="display:flex;background:#122040;color:#c8d6f0;border-bottom:1px solid rgba(255,255,255,0.1);">`;
+  html += `<div style="width:${LABEL_W}px;flex-shrink:0;border-right:1px solid rgba(255,255,255,0.15);"></div>`;
+  html += `<div style="display:flex;flex:1;">`;
+  weeks.forEach(w=>{
+    html += `<div style="width:${w.span*DAY_W}px;flex-shrink:0;padding:4px 6px;font-size:0.58rem;border-left:1px solid rgba(255,255,255,0.1);white-space:nowrap;overflow:hidden;">Wk: ${w.label}</div>`;
+  });
+  html += `</div></div>`;
+
+  // ── HEADER ROW 3: Day numbers ────────────────
+  html += `<div style="display:flex;background:#1a3a6e;color:#a8c4e8;border-bottom:2px solid var(--border);">`;
+  html += `<div style="width:${LABEL_W}px;flex-shrink:0;border-right:1px solid rgba(255,255,255,0.15);padding:4px 12px;font-size:0.58rem;color:rgba(255,255,255,0.4);">Mon–Sat only</div>`;
+  html += `<div style="display:flex;flex:1;">`;
+  const dayNames = ['','Mon','Tue','Wed','Thu','Fri','Sat'];
+  days.forEach((d,i)=>{
+    const isToday = d.isToday;
+    const isSat   = d.dow === 6;
+    const bg      = isToday ? 'rgba(192,57,43,0.35)' : isSat ? 'rgba(255,255,255,0.04)' : 'transparent';
+    const col     = isToday ? '#fff' : isSat ? 'rgba(255,255,255,0.5)' : 'rgba(168,196,232,0.8)';
+    const fw      = isToday ? '800' : '400';
+    html += `<div style="width:${DAY_W}px;flex-shrink:0;padding:3px 2px;text-align:center;background:${bg};color:${col};font-weight:${fw};font-size:0.55rem;border-left:1px solid rgba(255,255,255,${isSat?'0.15':'0.05'});">
+      <div style="font-size:0.5rem;opacity:0.7;">${dayNames[d.dow]}</div>
+      <div>${d.label}</div>
+    </div>`;
+  });
+  html += `</div></div>`;
+
+  // ── TASK ROWS ────────────────────────────────
+  schedule.forEach((t,i)=>{
+    if(!t.start||!t.end) return;
+    const colStart = dateToCol[t.start];
+    const colEnd   = dateToCol[t.end];
+    if(colStart===undefined && colEnd===undefined) return;
+
+    // find first/last col within our day list
+    let cs = colStart;
+    let ce = colEnd;
+    // if start not in map (was Sunday?), find nearest
+    if(cs===undefined){
+      const s2 = skipSunday(t.start);
+      cs = dateToCol[s2] || 0;
+    }
+    if(ce===undefined){
+      // find last valid col
+      ce = cs;
+      Object.entries(dateToCol).forEach(([iso,col])=>{ if(iso<=t.end && col>ce) ce=col; });
+    }
+
+    const left  = cs * DAY_W;
+    const width = Math.max(DAY_W, (ce - cs + 1) * DAY_W);
+    const barColor = taskBarColor(t.status);
+    const pct      = Math.min(100, Math.max(0, t.progress||0));
+    const rowBg    = i%2===0 ? '#fff' : '#f8fafc';
+
+    html += `<div style="display:flex;border-bottom:1px solid var(--border);min-height:36px;align-items:center;background:${rowBg};">`;
+    html += `<div style="width:${LABEL_W}px;flex-shrink:0;padding:5px 10px;font-weight:600;color:var(--navy);border-right:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" title="${t.desc}">
+      <span style="color:var(--muted);font-size:0.58rem;margin-right:4px;">#${i+1}</span>${t.desc}
+    </div>`;
+
+    html += `<div style="flex:1;position:relative;height:36px;">`;
+
+    // Sunday column shade + today line
+    days.forEach((d,ci)=>{
+      if(d.dow===6){
+        html += `<div style="position:absolute;left:${ci*DAY_W}px;top:0;bottom:0;width:${DAY_W}px;background:rgba(0,0,0,0.03);"></div>`;
+      }
+      if(d.isToday){
+        html += `<div style="position:absolute;left:${ci*DAY_W}px;top:0;bottom:0;width:${DAY_W}px;background:rgba(192,57,43,0.06);border-left:2px solid rgba(192,57,43,0.5);z-index:1;"></div>`;
+      }
+    });
+
+    // Background bar (transparent)
+    html += `<div style="position:absolute;left:${left}px;top:50%;transform:translateY(-50%);width:${width}px;height:20px;border-radius:3px;background:${barColor};opacity:0.18;"></div>`;
+    // Progress fill
+    if(pct>0){
+      html += `<div style="position:absolute;left:${left}px;top:50%;transform:translateY(-50%);width:${Math.round(width*pct/100)}px;height:20px;border-radius:3px;background:${barColor};z-index:2;"></div>`;
+    }
+    // Label
+    if(width > 30){
+      html += `<div style="position:absolute;left:${left+5}px;top:50%;transform:translateY(-50%);font-size:0.58rem;font-weight:700;color:#fff;white-space:nowrap;pointer-events:none;z-index:3;">${pct>0?pct+'%':''}</div>`;
+    }
+
+    // Dependency arrows
+    parseDeps(t.depends).forEach(depNum=>{
+      const di = depNum-1;
+      if(di<0||di>=schedule.length||!schedule[di].end) return;
+      const depCol = dateToCol[schedule[di].end];
+      if(depCol===undefined) return;
+      const x1 = (depCol+1)*DAY_W;
+      const x2 = left;
+      if(x2>x1){
+        html += `<div style="position:absolute;left:${x1}px;top:50%;height:0;width:${x2-x1}px;border-top:2px dashed rgba(37,99,176,0.5);z-index:4;"></div>`;
+        html += `<div style="position:absolute;left:${x2-6}px;top:50%;transform:translateY(-50%);width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:7px solid rgba(37,99,176,0.7);z-index:4;"></div>`;
+      }
+    });
+
+    html += `</div></div>`;
+  });
+
+  html += `</div>`;
+  wrap.innerHTML = html;
+}
+
+// ── Task table render ─────────────────────────────────────────────────────
+function renderScheduleTable(schedule){
+  const tbody = document.getElementById('schedule-tbody');
+  if(!tbody) return;
+  if(!schedule.length){
+    tbody.innerHTML='<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted);">No tasks yet. Click "+ Add Task" to start.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = schedule.map((t,i)=>{
+    const wd       = t.workDays || (t.start&&t.end ? countWorkDays(t.start,t.end) : '—');
+    const calDays  = (t.start&&t.end) ? daysBetween(t.start,t.end)+1 : '—';
+    const pct      = t.progress||0;
+    const depNames = parseDeps(t.depends).map(n=>'#'+n).join(', ') || '—';
+    return `<tr>
+      <td style="color:var(--muted);font-size:0.62rem">${i+1}</td>
+      <td style="font-weight:700;color:var(--navy);max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${t.desc}">${t.desc}</td>
+      <td style="font-size:0.68rem;color:var(--muted)">${t.cat||'—'}</td>
+      <td style="font-size:0.68rem;color:var(--blue)">${depNames}</td>
+      <td>${fmtD(t.start)}</td>
+      <td>${fmtD(t.end)}</td>
+      <td style="text-align:center;font-weight:700">${wd}<span style="font-size:0.55rem;color:var(--muted);font-weight:400"> wd</span></td>
+      <td><span class="tag ${taskStatusClass(t.status)}">${t.status||'Not Started'}</span></td>
+      <td>
+        <div style="background:var(--border);border-radius:20px;height:7px;min-width:60px;overflow:hidden;">
+          <div style="background:${taskBarColor(t.status)};height:100%;width:${pct}%;border-radius:20px;"></div>
+        </div>
+        <span style="font-size:0.58rem;color:var(--muted)">${pct}%</span>
+      </td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openTaskModal(${i})" title="Edit">✎</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteTask(${i})" title="Delete">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Main render ───────────────────────────────────────────────────────────
+function renderSchedule(){
+  const schedule = getSchedule();
+  renderScheduleKpis(schedule);
+  renderGantt(schedule);
+  renderScheduleTable(schedule);
+}
+
+// ── Export Excel ──────────────────────────────────────────────────────────
+function exportScheduleExcel(){
+  const schedule = getSchedule();
+  if(!schedule.length){ showToast('No tasks to export','error'); return; }
+  const rows = [['#','Activity','Category','Depends On','Start','End','Working Days','Calendar Days','Status','Progress %','Notes']];
+  schedule.forEach((t,i)=>{
+    const wd  = t.workDays || (t.start&&t.end ? countWorkDays(t.start,t.end) : '');
+    const cal = (t.start&&t.end) ? daysBetween(t.start,t.end)+1 : '';
+    rows.push([i+1, t.desc, t.cat||'', t.depends||'', t.start, t.end, wd, cal, t.status||'Not Started', t.progress||0, t.notes||'']);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:4},{wch:35},{wch:18},{wch:12},{wch:13},{wch:13},{wch:14},{wch:15},{wch:14},{wch:12},{wch:30}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+  XLSX.writeFile(wb, (activeProject||'Schedule').replace(/\s+/g,'_')+'_Schedule.xlsx');
+  showToast('Schedule exported ✓','success');
+}
+
+// ── Export Schedule as PDF ────────────────────────────────────────────────
+async function exportSchedulePDF(){
+  const schedule = getSchedule();
+  if(!schedule.length){ showToast('No tasks to export','error'); return; }
+  // Wait up to 5s for jsPDF to load
+  if(typeof window.jspdf === 'undefined'){
+    showToast('Loading PDF library…');
+    let tries=0;
+    await new Promise((resolve,reject)=>{
+      const t=setInterval(()=>{
+        tries++;
+        if(typeof window.jspdf !== 'undefined'){ clearInterval(t); resolve(); }
+        else if(tries>50){ clearInterval(t); reject(new Error('jsPDF not loaded')); }
+      },100);
+    }).catch(()=>{ showToast('PDF library failed to load. Check internet connection.','error'); return null; });
+    if(typeof window.jspdf === 'undefined') return;
+  }
+
+  showToast('Generating PDF…');
+
+  const { jsPDF } = window.jspdf;
+  const projName = activeProject || 'Project';
+  const dateStr  = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const today    = new Date(); today.setHours(0,0,0,0);
+
+  // ── Color helpers ──────────────────────────────
+  function hexToRgb(hex){
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return [r,g,b];
+  }
+  function bColor(s){
+    return {'Completed':'#1a5c3a','In Progress':'#2563b0','Delayed':'#c0392b','On Hold':'#92400e'}[s]||'#64748b';
+  }
+
+  // ── Build working-day column array ─────────────
+  const valid = schedule.filter(t=>t.start&&t.end);
+  if(!valid.length){ showToast('Tasks need start/end dates','error'); return; }
+
+  let minDate = new Date(Math.min(...valid.map(t=>new Date(t.start+'T00:00:00'))));
+  let maxDate = new Date(Math.max(...valid.map(t=>new Date(t.end+'T00:00:00'))));
+  while(minDate.getDay()!==1) minDate.setDate(minDate.getDate()-1);
+  while(maxDate.getDay()!==6) maxDate.setDate(maxDate.getDate()+1);
+
+  const wdays=[];
+  const cc=new Date(minDate);
+  while(cc<=maxDate){
+    if(cc.getDay()!==0) wdays.push({iso:cc.toISOString().split('T')[0],dow:cc.getDay(),
+      isToday:cc.getTime()===today.getTime(),n:cc.getDate()});
+    cc.setDate(cc.getDate()+1);
+  }
+  const d2c={};
+  wdays.forEach((d,i)=>d2c[d.iso]=i);
+
+  // Week groups
+  const weeks=[];
+  wdays.forEach((d,i)=>{
+    if(d.dow===1||i===0){
+      const ws=new Date(d.iso+'T00:00:00'),we=new Date(ws);we.setDate(we.getDate()+5);
+      weeks.push({label:ws.toLocaleDateString('en-US',{month:'short',day:'numeric'})+'-'+we.toLocaleDateString('en-US',{month:'short',day:'numeric'}),start:i,span:0});
+    }
+    weeks[weeks.length-1].span++;
+  });
+
+  // Month groups
+  const months=[];
+  wdays.forEach((d,i)=>{
+    const dt=new Date(d.iso+'T00:00:00'),key=dt.getFullYear()+'-'+dt.getMonth();
+    if(!months.length||months[months.length-1].key!==key)
+      months.push({key,label:dt.toLocaleDateString('en-US',{month:'short',year:'numeric'}),start:i,span:0});
+    months[months.length-1].span++;
+  });
+
+  // ── PDF dimensions (A4 landscape = 297×210mm) ──
+  const pdf = new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const PW  = 297, PH = 210;
+  const ML  = 10, MR = 10, MT = 10;
+
+  // ── LOGO ──────────────────────────────────────
+  const logoEl = document.querySelector('.sidebar-logo img');
+  let logoY = MT;
+  const headerH = 18;
+
+  // Draw header bar
+  pdf.setFillColor(13,32,69);
+  pdf.rect(ML, MT, PW-ML-MR, headerH, 'F');
+
+  // Try adding logo image
+  if(logoEl && logoEl.src){
+    try{
+      // Create a small canvas to convert the logo
+      const tmpC=document.createElement('canvas');
+      tmpC.width=120;tmpC.height=60;
+      const ctx=tmpC.getContext('2d');
+      ctx.fillStyle='#0d2045';
+      ctx.fillRect(0,0,120,60);
+      ctx.drawImage(logoEl,0,0,120,60);
+      const logoData=tmpC.toDataURL('image/png');
+      pdf.addImage(logoData,'PNG',ML+2,MT+1,24,headerH-2);
+    }catch(e){ /* skip logo if error */ }
+  }
+
+  // Company name in header
+  pdf.setTextColor(255,255,255);
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(13);
+  pdf.text('WAICH CONSTRUCTION', ML+30, MT+7);
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica','normal');
+  pdf.text('Project Schedule Report', ML+30, MT+13);
+
+  // Project name + date (right side)
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(11);
+  pdf.text(projName, PW-MR, MT+7, {align:'right'});
+  pdf.setFont('helvetica','normal');
+  pdf.setFontSize(7.5);
+  pdf.text('Generated: '+dateStr, PW-MR, MT+12, {align:'right'});
+  pdf.text(schedule.length+' tasks · '+schedule.filter(t=>t.status==='Completed').length+' completed', PW-MR, MT+16.5, {align:'right'});
+
+  // ── LAYOUT: left = activity list, right = gantt ─
+  let curY = MT + headerH + 4;
+  const LIST_W = 68;  // mm for left activity list
+  const GANTT_X = ML + LIST_W + 3;
+  const GANTT_W = PW - GANTT_X - MR;
+  const BODY_H  = PH - curY - 8; // leave 8mm footer
+
+  // ── ACTIVITY LIST (left column) ──────────────
+  const ROW_H   = 5.5;
+  const HDR_H   = 4.5;
+  const dayNames=['','Mo','Tu','We','Th','Fr','Sa'];
+
+  // Section label
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(7);
+  pdf.setTextColor(13,32,69);
+  pdf.text('ACTIVITY LIST', ML, curY+3);
+
+  // Table header
+  const tblY = curY + 5;
+  pdf.setFillColor(13,32,69);
+  pdf.rect(ML, tblY, LIST_W, HDR_H, 'F');
+  pdf.setTextColor(255,255,255);
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(6);
+  pdf.text('#',   ML+1.5, tblY+3);
+  pdf.text('Activity',    ML+6,   tblY+3);
+  pdf.text('Start',       ML+39,  tblY+3);
+  pdf.text('End',         ML+50,  tblY+3);
+  pdf.text('WD',          ML+60,  tblY+3);
+  pdf.text('Status',      ML+65,  tblY+3);
+
+  // Rows
+  let rowY = tblY + HDR_H;
+  schedule.forEach((t,i)=>{
+    const bg = i%2===0 ? [255,255,255] : [248,250,252];
+    pdf.setFillColor(...bg);
+    pdf.rect(ML, rowY, LIST_W, ROW_H, 'F');
+
+    // border bottom
+    pdf.setDrawColor(226,232,240);
+    pdf.line(ML, rowY+ROW_H, ML+LIST_W, rowY+ROW_H);
+
+    // # 
+    pdf.setFont('helvetica','normal');
+    pdf.setFontSize(5.5);
+    pdf.setTextColor(148,163,184);
+    pdf.text(String(i+1), ML+1.5, rowY+3.5);
+
+    // desc (truncate)
+    pdf.setTextColor(13,32,69);
+    pdf.setFont('helvetica','bold');
+    pdf.setFontSize(6);
+    const maxDescW = 30;
+    let desc = t.desc || '';
+    while(desc.length>0 && pdf.getTextWidth(desc)>maxDescW) desc=desc.slice(0,-1);
+    if(desc.length<(t.desc||'').length) desc+='…';
+    pdf.text(desc, ML+6, rowY+3.8);
+
+    // dates
+    pdf.setFont('helvetica','normal');
+    pdf.setFontSize(5.5);
+    pdf.setTextColor(71,85,105);
+    if(t.start) pdf.text(fmtD(t.start), ML+39, rowY+3.8);
+    if(t.end)   pdf.text(fmtD(t.end),   ML+50, rowY+3.8);
+
+    // work days
+    const wd = t.workDays||(t.start&&t.end?countWorkDays(t.start,t.end):'');
+    pdf.setFont('helvetica','bold');
+    pdf.setFontSize(6);
+    pdf.setTextColor(13,32,69);
+    if(wd) pdf.text(String(wd), ML+62, rowY+3.8);
+
+    // status dot
+    const [sr,sg,sb] = hexToRgb(bColor(t.status));
+    pdf.setFillColor(sr,sg,sb);
+    pdf.circle(ML+66.5, rowY+3, 1.5, 'F');
+
+    rowY += ROW_H;
+    if(rowY > PH - 12) return; // clip if too many tasks
+  });
+
+  // ── GANTT (right column) ──────────────────────
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(7);
+  pdf.setTextColor(13,32,69);
+  pdf.text('GANTT CHART', GANTT_X, curY+3);
+
+  const GANTT_Y   = curY + 5;
+  const totalCols = wdays.length;
+  const COL_W     = Math.max(1.8, Math.min(4, GANTT_W / totalCols));
+  const G_HDR1    = 4;   // month row height
+  const G_HDR2    = 3.5; // week row height
+  const G_HDR3    = 4;   // day row height
+  const G_ROW_H   = ROW_H;
+  const GLABEL_W  = 0;   // no label in gantt — activity is on left
+
+  // Month header row
+  let ghY = GANTT_Y;
+  pdf.setFillColor(13,32,69);
+  pdf.rect(GANTT_X, ghY, GANTT_W, G_HDR1, 'F');
+  pdf.setTextColor(255,255,255);
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(5.5);
+  months.forEach(m=>{
+    const x=GANTT_X+m.start*COL_W;
+    const w=m.span*COL_W;
+    pdf.setDrawColor(255,255,255,0.3);
+    pdf.line(x,ghY,x,ghY+G_HDR1);
+    if(w>8) pdf.text(m.label, x+1, ghY+2.8);
+  });
+  ghY += G_HDR1;
+
+  // Week header row
+  pdf.setFillColor(18,32,64);
+  pdf.rect(GANTT_X, ghY, GANTT_W, G_HDR2, 'F');
+  pdf.setTextColor(200,214,240);
+  pdf.setFont('helvetica','normal');
+  pdf.setFontSize(4.5);
+  weeks.forEach(w=>{
+    const x=GANTT_X+w.start*COL_W;
+    const ww=w.span*COL_W;
+    pdf.setDrawColor(100,120,160);
+    pdf.line(x,ghY,x,ghY+G_HDR2);
+    if(ww>10) pdf.text(w.label, x+0.8, ghY+2.3);
+  });
+  ghY += G_HDR2;
+
+  // Day header row
+  pdf.setFillColor(26,58,110);
+  pdf.rect(GANTT_X, ghY, GANTT_W, G_HDR3, 'F');
+  pdf.setTextColor(168,196,232);
+  pdf.setFont('helvetica','normal');
+  pdf.setFontSize(4);
+  wdays.forEach((d,i)=>{
+    const x = GANTT_X + i*COL_W;
+    if(d.isToday){ pdf.setFillColor(192,57,43); pdf.rect(x,ghY,COL_W,G_HDR3,'F'); }
+    else if(d.dow===6){ pdf.setFillColor(30,60,100); pdf.rect(x,ghY,COL_W,G_HDR3,'F'); }
+    pdf.setDrawColor(50,80,130);
+    pdf.line(x,ghY,x,ghY+G_HDR3);
+    if(COL_W>=3){
+      pdf.setTextColor(d.isToday?255:168, d.isToday?255:196, d.isToday?255:232);
+      pdf.text(String(d.n), x+COL_W/2, ghY+G_HDR3-0.8, {align:'center'});
+    }
+  });
+  ghY += G_HDR3;
+
+  // Task bar rows
+  schedule.forEach((t,i)=>{
+    if(!t.start||!t.end) return;
+    const rowTop = tblY + HDR_H + i*ROW_H;
+    if(rowTop > PH-12) return;
+
+    const barY = rowTop + ROW_H/2;
+
+    // Today column highlight
+    const todayCol = wdays.findIndex(d=>d.isToday);
+    if(todayCol>=0){
+      pdf.setFillColor(192,57,43,0.08);
+      pdf.rect(GANTT_X+todayCol*COL_W, rowTop, COL_W, ROW_H, 'F');
+    }
+
+    // Row background
+    const bg2 = i%2===0 ? [255,255,255] : [248,250,252];
+    pdf.setFillColor(...bg2);
+    pdf.rect(GANTT_X, rowTop, GANTT_W, ROW_H, 'F');
+
+    // Row bottom line
+    pdf.setDrawColor(226,232,240);
+    pdf.line(GANTT_X, rowTop+ROW_H, GANTT_X+GANTT_W, rowTop+ROW_H);
+
+    let cs = d2c[t.start];
+    let ce = d2c[t.end];
+    if(cs===undefined){const s2=skipSunday(t.start);cs=d2c[s2]||0;}
+    if(ce===undefined){ce=cs;Object.entries(d2c).forEach(([iso,col])=>{if(iso<=t.end&&col>ce)ce=col;});}
+
+    const bLeft  = GANTT_X + cs*COL_W;
+    const bWidth = Math.max(COL_W, (ce-cs+1)*COL_W);
+    const pct    = Math.min(100,Math.max(0,t.progress||0));
+    const [br,bg3,bb] = hexToRgb(bColor(t.status));
+
+    // Bar background (faint)
+    pdf.setFillColor(br,bg3,bb);
+    pdf.setGState && pdf.setGState(pdf.GState({opacity:0.2}));
+    pdf.rect(bLeft, rowTop+1, bWidth, ROW_H-2, 'F');
+    pdf.setGState && pdf.setGState(pdf.GState({opacity:1}));
+
+    // Progress fill
+    if(pct>0){
+      pdf.setFillColor(br,bg3,bb);
+      pdf.rect(bLeft, rowTop+1, bWidth*(pct/100), ROW_H-2, 'F');
+    }
+
+    // Dependency line
+    parseDeps(t.depends).forEach(depNum=>{
+      const di=depNum-1;
+      if(di<0||di>=schedule.length||!schedule[di].end) return;
+      const depCe=d2c[schedule[di].end];
+      if(depCe===undefined) return;
+      const x1=GANTT_X+(depCe+1)*COL_W, x2=bLeft;
+      if(x2>x1){
+        pdf.setDrawColor(37,99,176);
+        pdf.setLineDashPattern([0.8,0.8],0);
+        pdf.line(x1, barY, x2, barY);
+        pdf.setLineDashPattern([],0);
+        // Arrow
+        pdf.setFillColor(37,99,176);
+        pdf.triangle(x2-2,barY-1.5, x2-2,barY+1.5, x2,barY,'F');
+      }
+    });
+  });
+
+  // Gantt border
+  pdf.setDrawColor(180,180,180);
+  pdf.rect(GANTT_X, GANTT_Y, GANTT_W, ghY-GANTT_Y+(schedule.length*ROW_H), 'S');
+
+  // ── FOOTER ───────────────────────────────────
+  pdf.setFont('helvetica','normal');
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(148,163,184);
+  pdf.text('Waich Construction — Confidential', ML, PH-4);
+  pdf.text(projName+' Schedule · '+dateStr, PW-MR, PH-4, {align:'right'});
+
+  // ── SAVE ─────────────────────────────────────
+  const filename = projName.replace(/\s+/g,'_')+'_Schedule.pdf';
+  pdf.save(filename);
+  showToast('PDF exported ✓','success');
+}
+// ── Add CSS for schedule tags ─────────────────
+(function(){
+  const s = document.createElement('style');
+  s.textContent = `
+    .s-notstarted{background:#f1f5f9;color:#475569;}
+    .s-inprogress{background:#dbeafe;color:#1e40af;}
+    .s-completed{background:#dcfce7;color:#166534;}
+    .s-delayed{background:#fee2e2;color:#991b1b;}
+    .s-onhold{background:#fef9c3;color:#854d0e;}
+  `;
+  document.head.appendChild(s);
+})();
+</script>
 
 <script>
 // Mobile nav helper
