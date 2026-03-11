@@ -668,6 +668,10 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
 
       <div id="conn-banner" style="display:none;background:var(--green-faint);border:1px solid #86efac;border-radius:8px;padding:13px 18px;margin-bottom:16px;font-size:0.78rem;color:var(--green);">
         ✅ <strong>Conectado a Google Sheets.</strong> Cada proyecto se guarda en su propia hoja automáticamente.
+        <div style="margin-top:10px;">
+          <button class="btn btn-primary" onclick="pushAllProjectsToSheet()" id="push-all-btn">☁️ Upload All Projects to Sheets</button>
+          <div id="push-all-status" style="margin-top:8px;font-size:0.72rem;"></div>
+        </div>
       </div>
 
       <div class="setup-steps">
@@ -1678,6 +1682,33 @@ function exportExcel(){
 // ════════════════════════════════════════════
 // GOOGLE SHEETS
 // ════════════════════════════════════════════
+async function pushAllProjectsToSheet(){
+  if(!SHEET_URL){ showToast('Not connected to Sheets','error'); return; }
+  const btn=$('push-all-btn');
+  const status=$('push-all-status');
+  btn.disabled=true; btn.textContent='⏳ Uploading...';
+  status.innerHTML='';
+  let success=0, failed=0;
+  for(const proj of projects){
+    if(!proj.transactions||!proj.transactions.length){ 
+      status.innerHTML+=`<div>⏭️ <strong>${proj.name}</strong> — no transactions, skipped</div>`;
+      continue;
+    }
+    try{
+      setSyncStatus('syncing');
+      await postToSheet({action:'bulk', project:proj.name, rows:proj.transactions});
+      success++;
+      status.innerHTML+=`<div style="color:var(--green)">✅ <strong>${proj.name}</strong> — ${proj.transactions.length} transactions uploaded</div>`;
+    }catch(e){
+      failed++;
+      status.innerHTML+=`<div style="color:var(--red)">❌ <strong>${proj.name}</strong> — failed</div>`;
+    }
+  }
+  setSyncStatus(failed===0?'live':'off');
+  btn.disabled=false; btn.textContent='☁️ Upload All Projects to Sheets';
+  showToast(failed===0?`✅ All ${success} projects uploaded!`:`⚠️ ${success} ok, ${failed} failed`, failed===0?'success':'error');
+}
+
 async function postToSheet(payload){
   const r=await fetch(SHEET_URL,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}});
   const d=await r.json();
