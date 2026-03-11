@@ -1180,6 +1180,7 @@ function switchProject(name){
   if(name) showToast(`📁 Switched to "${name}"`, 'success');
   // Load from sheets if connected
   if(SHEET_URL && name) loadFromSheet(name);
+  startAutoSync();
 }
 
 function updateTopbarBadge(){
@@ -1709,6 +1710,45 @@ async function loadFromSheet(projectName){
   loading(false);
 }
 
+// ── AUTO-SYNC: pull from Sheets every 60 seconds ──
+let _autoSyncInterval = null;
+function startAutoSync(){
+  if(_autoSyncInterval) clearInterval(_autoSyncInterval);
+  _autoSyncInterval = setInterval(async ()=>{
+    if(SHEET_URL && activeProject){
+      await silentPullFromSheet(activeProject);
+    }
+  }, 60000);
+}
+
+async function silentPullFromSheet(projectName){
+  if(!SHEET_URL||!projectName) return;
+  try{
+    setSyncStatus('syncing');
+    const r=await fetch(`${SHEET_URL}?project=${encodeURIComponent(projectName)}&_=${Date.now()}`);
+    const d=await r.json();
+    if(d.status==='ok'&&d.rows&&d.rows.length){
+      const proj=projects.find(p=>p.name===projectName);
+      if(!proj) return;
+      const newTx = d.rows.map((r,i)=>({
+        _id:Date.now()+i, nro:r['Nro']||i+1,
+        date:r['Date']?String(r['Date']).substring(0,10):'',
+        payee:r['Payee']||'', debit:r['Debit']?parseFloat(r['Debit']):null,
+        credit:r['Credit']?parseFloat(r['Credit']):null,
+        category:r['Category']||'', check:r['Check/Ref']||'',
+        bank:String(r['Bank Account']||'').trim(), payment:String(r['Payment Method']||'').trim(), notes:r['Notes']||''
+      }));
+      // Only update if data actually changed
+      if(JSON.stringify(newTx.map(t=>t.nro+t.payee+t.date)) !== JSON.stringify(proj.transactions.map(t=>t.nro+t.payee+t.date))){
+        proj.transactions = newTx;
+        saveProjects(); refreshAll();
+        showToast('🔄 Synced from Sheets','success');
+      }
+    }
+    setSyncStatus('live');
+  }catch(e){ setSyncStatus('off'); }
+}
+
 async function saveSheetUrl(){
   const url=$('sheets-url-input').value.trim();
   if(!url||!url.includes('script.google.com')){ showToast('Paste a valid Apps Script URL','error'); return; }
@@ -1720,8 +1760,8 @@ async function saveSheetUrl(){
     const d=await r.json();
     $('conn-status-msg').innerHTML='<span style="color:var(--green)">✅ Connected! Data will sync automatically.</span>';
     setSyncStatus('live'); checkConnBanner();
-    showToast('✅ Google Sheets connected!','success');
-    if(activeProject) loadFromSheet(activeProject);
+    showToast('✅ Google Sheets connected! Auto-sync every 60s.','success');
+    if(activeProject){ loadFromSheet(activeProject); startAutoSync(); }
   }catch(e){
     $('conn-status-msg').innerHTML='<span style="color:var(--red)">❌ Could not connect. Check the URL and make sure access is set to "Anyone".</span>';
     setSyncStatus('off');
