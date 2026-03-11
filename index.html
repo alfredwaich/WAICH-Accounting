@@ -484,34 +484,34 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
         <div class="dk"><div class="dk-label">📊 Net Balance</div><div class="dk-value navy" id="d-balance">$0</div><div class="dk-sub">received − paid</div></div>
         <div class="dk"><div class="dk-label">📋 Total Contract Value</div><div class="dk-value blue" id="d-contract">$0</div><div class="dk-sub" id="d-contract-sub">See Customer Accounting</div></div>
       </div>
-      <div class="dash-grid">
-        <!-- Payments by vendor -->
-        <div class="summary-card">
-          <div class="sc-header">
-            <div class="sc-title">💸 Paid to Vendors — click to expand</div>
-            <div class="sc-total red" id="d-total-paid">$0</div>
-          </div>
-          <div id="payee-accordion">
-            <div class="empty-state"><div class="empty-icon">🏗️</div><div class="empty-text">No transactions yet.<br>Add entries or import an Excel file.</div></div>
-          </div>
-        </div>
-        <!-- Client payments -->
-        <div class="summary-card">
-          <div class="sc-header">
-            <div class="sc-title">💵 Client Payments Received</div>
-            <div class="sc-total green" id="d-total-received">$0</div>
-          </div>
-          <div id="client-list">
-            <div class="empty-state"><div class="empty-icon">💰</div><div class="empty-text">No client payments recorded yet.</div></div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Extra dashboard info -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:4px;">
-        <div class="dk"><div class="dk-label">🏗 Subcontractors</div><div class="dk-value red" id="d-subs">$0</div><div class="dk-sub" id="d-subs-pct">— % of expenses</div></div>
-        <div class="dk"><div class="dk-label">📋 Permit Fees</div><div class="dk-value navy" id="d-permits">$0</div><div class="dk-sub" id="d-permits-pct">— % of expenses</div></div>
-        <div class="dk"><div class="dk-label">🧾 Prof. Fees</div><div class="dk-value blue" id="d-prof">$0</div><div class="dk-sub" id="d-prof-pct">— % of expenses</div></div>
+      <!-- Progress bars -->
+      <div class="card" style="margin-top:0;">
+        <div style="margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+            <span style="font-size:0.78rem;font-weight:700;color:var(--navy);">💸 Spent vs Total Contract</span>
+            <span style="font-size:0.72rem;color:var(--muted)" id="prog-spent-label">$0 of $0</span>
+          </div>
+          <div style="background:var(--navy-faint);border-radius:99px;height:18px;overflow:hidden;">
+            <div id="prog-spent-bar" style="height:100%;background:linear-gradient(90deg,#c0392b,#e74c3c);border-radius:99px;width:0%;transition:width 0.6s;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;">
+              <span id="prog-spent-pct" style="font-size:0.65rem;font-weight:800;color:#fff;"></span>
+            </div>
+          </div>
+          <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;" id="prog-spent-sub"></div>
+        </div>
+
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+            <span style="font-size:0.78rem;font-weight:700;color:var(--navy);">💵 Received vs Total Contract</span>
+            <span style="font-size:0.72rem;color:var(--muted)" id="prog-recv-label">$0 of $0</span>
+          </div>
+          <div style="background:var(--navy-faint);border-radius:99px;height:18px;overflow:hidden;">
+            <div id="prog-recv-bar" style="height:100%;background:linear-gradient(90deg,#1a5c3a,#22c55e);border-radius:99px;width:0%;transition:width 0.6s;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;">
+              <span id="prog-recv-pct" style="font-size:0.65rem;font-weight:800;color:#fff;"></span>
+            </div>
+          </div>
+          <div style="font-size:0.68rem;color:var(--muted);margin-top:4px;" id="prog-recv-sub"></div>
+        </div>
       </div>
     </div>
 
@@ -1100,7 +1100,7 @@ function showToast(msg, type='', dur=2800){
 function loading(on){ $('loading-bar').style.width=on?'70%':'100%'; if(!on) setTimeout(()=>$('loading-bar').style.width='0',300); }
 function openModal(id){ $(id).classList.add('open'); }
 function closeModal(id){ $(id).classList.remove('open'); }
-function saveProjects(){ localStorage.setItem('wc_projects', JSON.stringify(projects)); }
+function saveProjects(){ localStorage.setItem('wc_projects', JSON.stringify(projects)); _lastPushedHash = ''; }
 
 function getActiveTx(){
   const p = projects.find(p=>p.name===activeProject);
@@ -1230,13 +1230,6 @@ function showView(v){
   if(v==='setup'){ if(SHEET_URL) $('sheets-url-input').value=SHEET_URL; checkConnBanner(); }
 }
 
-function refreshAll(){
-  const active = document.querySelector('.view.active');
-  if(!active) return;
-  const id = active.id.replace('view-','');
-  showView(id);
-}
-
 // ════════════════════════════════════════════
 // DASHBOARD
 // ════════════════════════════════════════════
@@ -1245,11 +1238,6 @@ function renderDashboard(){
   const credits = tx.filter(t=>t.credit).reduce((s,t)=>s+(t.credit||0),0);
   const debits  = tx.filter(t=>t.debit).reduce((s,t)=>s+(t.debit||0),0);
   const balance = credits - debits;
-  const cobrar  = tx.filter(t=>(t.notes||'').toUpperCase().includes('COBRAR'));
-  const cobrarAmt = cobrar.reduce((s,t)=>s+(t.debit||0),0);
-  const subs    = tx.filter(t=>t.debit&&(t.category||'').toLowerCase().includes('sub')).reduce((s,t)=>s+t.debit,0);
-  const permits = tx.filter(t=>t.debit&&((t.category||'').toLowerCase().includes('permit')||(t.category||'').toLowerCase().includes('plan'))).reduce((s,t)=>s+t.debit,0);
-  const prof    = tx.filter(t=>t.debit&&(t.category||'').toLowerCase().includes('prof')).reduce((s,t)=>s+t.debit,0);
 
   $('d-credits').textContent = fmtS(credits);
   $('d-credits-n').textContent = tx.filter(t=>t.credit).length+' payments';
@@ -1257,16 +1245,8 @@ function renderDashboard(){
   $('d-debits-n').textContent = tx.filter(t=>t.debit).length+' expenses';
   $('d-balance').textContent = fmtS(Math.abs(balance));
   $('d-balance').className = 'dk-value '+(balance>=0?'green':'red');
-  $('d-cobrar').textContent = fmtS(cobrarAmt);
-  $('d-cobrar-n').textContent = cobrar.length+' items';
-  $('d-subs').textContent = fmtS(subs);
-  $('d-subs-pct').textContent = debits>0?(subs/debits*100).toFixed(1)+'% of expenses':'—';
-  $('d-permits').textContent = fmtS(permits);
-  $('d-permits-pct').textContent = debits>0?(permits/debits*100).toFixed(1)+'% of expenses':'—';
-  $('d-prof').textContent = fmtS(prof);
-  $('d-prof-pct').textContent = debits>0?(prof/debits*100).toFixed(1)+'% of expenses':'—';
 
-  // Update contract KPI from customer data
+  // Contract value from Customer Accounting
   const ca = getCA();
   const coT = ca ? ca.changeOrders.filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
   const allowB = ca ? ca.allowances.reduce((s,a)=>s+(a.budget||0),0) : 0;
@@ -1275,58 +1255,26 @@ function renderDashboard(){
   const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
   if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
-  if($('d-total-paid')) $('d-total-paid').textContent = fmtS(debits);
-  $('d-total-received').textContent = fmtS(credits);
 
-  // Group by payee
-  const payeeMap = {};
-  tx.filter(t=>t.debit).forEach(t=>{
-    const p=(t.payee||'Unknown').trim();
-    if(!payeeMap[p]) payeeMap[p]=[];
-    payeeMap[p].push(t);
-  });
-  const payees = Object.entries(payeeMap).sort((a,b)=>b[1].reduce((s,t)=>s+t.debit,0)-a[1].reduce((s,t)=>s+t.debit,0));
+  // ── Progress bar: Spent vs Contract ──
+  const spentPct = totalContractVal>0 ? Math.min((debits/totalContractVal)*100, 100) : 0;
+  $('prog-spent-bar').style.width = spentPct.toFixed(1)+'%';
+  $('prog-spent-pct').textContent = spentPct>8 ? spentPct.toFixed(1)+'%' : '';
+  $('prog-spent-label').textContent = fmtS(debits)+' of '+fmtS(totalContractVal);
+  $('prog-spent-sub').textContent = totalContractVal>0
+    ? `${spentPct.toFixed(1)}% spent — ${fmtS(totalContractVal-debits)} remaining`
+    : 'Set Total Contract Value in Customer Accounting';
 
-  if(!payees.length){
-    $('payee-accordion').innerHTML = '<div class="empty-state"><div class="empty-icon">🏗️</div><div class="empty-text">No expenses recorded yet.</div></div>';
-  } else {
-    $('payee-accordion').innerHTML = payees.map(([name, txs])=>{
-      const total = txs.reduce((s,t)=>s+(t.debit||0),0);
-      const id = 'pa-'+name.replace(/[^a-z0-9]/gi,'_');
-      return `<div class="payee-row">
-        <button class="payee-trigger" onclick="toggleAccordion('${id}',this)">
-          <span class="pt-name">${name}</span>
-          <span class="pt-count">${txs.length} tx</span>
-          <span class="pt-total">${fmtS(total)}</span>
-          <span class="pt-arrow">▾</span>
-        </button>
-        <div class="payee-detail" id="${id}">
-          ${txs.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(t=>`
-            <div class="pd-row">
-              <span class="pd-date">${t.date||'—'}</span>
-              <span class="tag ${setCatTag(t.category)} pd-cat">${t.category||'—'}</span>
-              <span class="pd-note">${t.notes||t.check||''}</span>
-              <span class="pd-amt">${fmt(t.debit)}</span>
-            </div>`).join('')}
-        </div>
-      </div>`;
-    }).join('');
-  }
-
-  // Client payments
-  const clientTx = tx.filter(t=>t.credit).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  if(!clientTx.length){
-    $('client-list').innerHTML = '<div class="empty-state"><div class="empty-icon">💰</div><div class="empty-text">No client payments yet.</div></div>';
-  } else {
-    $('client-list').innerHTML = clientTx.map(t=>`
-      <div class="client-row">
-        <span class="cr-date">${t.date||'—'}</span>
-        <span class="cr-note">${t.notes||t.payee||'—'}</span>
-        <span class="tag tag-pay cr-method">${t.payment||'—'}</span>
-        <span class="cr-amt">${fmt(t.credit)}</span>
-      </div>`).join('');
-  }
+  // ── Progress bar: Received vs Contract ──
+  const recvPct = totalContractVal>0 ? Math.min((credits/totalContractVal)*100, 100) : 0;
+  $('prog-recv-bar').style.width = recvPct.toFixed(1)+'%';
+  $('prog-recv-pct').textContent = recvPct>8 ? recvPct.toFixed(1)+'%' : '';
+  $('prog-recv-label').textContent = fmtS(credits)+' of '+fmtS(totalContractVal);
+  $('prog-recv-sub').textContent = totalContractVal>0
+    ? `${recvPct.toFixed(1)}% collected — ${fmtS(totalContractVal-credits)} pending`
+    : 'Set Total Contract Value in Customer Accounting';
 }
+
 
 function toggleAccordion(id, btn){
   const el=$(id);
@@ -1813,15 +1761,39 @@ function showVendorDetail(name){
   openModal('vendor-modal');
 }
 
-// ── AUTO-SYNC: pull from Sheets every 60 seconds ──
+// ── AUTO-SYNC: pull from Sheets every 60 seconds, push every 30 seconds ──
 let _autoSyncInterval = null;
+let _autoPushInterval = null;
+let _lastPushedHash = '';
+
+function getDataHash(){
+  const tx = getActiveTx();
+  return tx.map(t=>t.nro+'|'+t.payee+'|'+t.date+'|'+t.debit+'|'+t.credit).join(',');
+}
+
 function startAutoSync(){
   if(_autoSyncInterval) clearInterval(_autoSyncInterval);
+  if(_autoPushInterval) clearInterval(_autoPushInterval);
+
+  // Pull every 60s
   _autoSyncInterval = setInterval(async ()=>{
-    if(SHEET_URL && activeProject){
-      await silentPullFromSheet(activeProject);
-    }
+    if(SHEET_URL && activeProject) await silentPullFromSheet(activeProject);
   }, 60000);
+
+  // Push every 30s if data changed
+  _autoPushInterval = setInterval(async ()=>{
+    if(!SHEET_URL || !activeProject) return;
+    const hash = getDataHash();
+    if(hash === _lastPushedHash) return; // no changes
+    const tx = getActiveTx();
+    if(!tx.length) return;
+    try{
+      setSyncStatus('syncing');
+      await postToSheet({action:'bulk', project:activeProject, rows:tx});
+      _lastPushedHash = hash;
+      setSyncStatus('live');
+    }catch(e){ setSyncStatus('off'); }
+  }, 30000);
 }
 
 async function silentPullFromSheet(projectName){
