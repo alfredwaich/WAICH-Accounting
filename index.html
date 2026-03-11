@@ -2211,13 +2211,18 @@ function exportAllowancesExcel(){
 // ════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{
-  $('f-date').value=new Date().toISOString().substring(0,10);
+document.addEventListener('DOMContentLoaded',()=>{\n  $('f-date').value=new Date().toISOString().substring(0,10);
   renderProjectSelect();
   updateTopbarBadge();
-  if(SHEET_URL) setSyncStatus('live');
   if(activeProject && !projects.find(p=>p.name===activeProject)) activeProject='';
   renderDashboard();
+  // Auto-load from Sheets on startup if connected
+  if(SHEET_URL && activeProject){
+    setSyncStatus('syncing');
+    loadFromSheet(activeProject).then(()=>{ startAutoSync(); });
+  } else if(SHEET_URL){
+    setSyncStatus('live');
+  }
 });
 </script>
 
