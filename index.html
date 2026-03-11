@@ -444,6 +444,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
     <div class="nav-item" onclick="showView('projects')" id="nav-projects"><span class="nav-icon">🏗️</span> All Projects</div>
     <div class="nav-item" onclick="showView('setup')" id="nav-setup"><span class="nav-icon">⚙️</span> Google Sheets</div>
     <div class="nav-item" onclick="showView('import')" id="nav-import"><span class="nav-icon">📁</span> Import Excel</div>
+    <div class="nav-item" onclick="pushAllToSheet()" id="nav-push" style="color:#4ade80;"><span class="nav-icon">☁️</span> Push All to Sheets</div>
   </nav>
   <div class="sync-bar">
     <div class="sync-dot" id="sync-dot"></div>
@@ -1038,6 +1039,16 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
 </div>
 
 <!-- Bulk delete modal -->
+<div class="modal-overlay" id="vendor-modal" onclick="if(event.target===this)closeModal('vendor-modal')">
+  <div class="modal" style="max-width:700px;width:95%;">
+    <div class="modal-title" id="vendor-modal-title">Vendor Detail</div>
+    <div class="modal-body" id="vendor-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('vendor-modal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="bulk-modal">
   <div class="modal">
     <div class="modal-title">🗑 Delete Selected</div>
@@ -1264,6 +1275,7 @@ function renderDashboard(){
   const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
   if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
+  if($('d-total-paid')) $('d-total-paid').textContent = fmtS(debits);
   $('d-total-received').textContent = fmtS(credits);
 
   // Group by payee
@@ -1597,10 +1609,10 @@ function renderBreakdown(){
   tx.filter(t=>t.debit).forEach(t=>{ const p=(t.payee||'Unknown').trim(); if(!pm[p]) pm[p]={total:0,count:0}; pm[p].total+=t.debit; pm[p].count++; });
   const payees=Object.entries(pm).sort((a,b)=>b[1].total-a[1].total).slice(0,12);
   $('payee-breakdown').innerHTML=payees.map(([n,d])=>`
-    <div class="payee-card-b">
+    <div class="payee-card-b" onclick="showVendorDetail('${n.replace(/'/g,"\\'")}') " style="cursor:pointer;" title="Click to see detail">
       <div class="pcb-name">${n}</div>
       <div class="pcb-amt">${fmtS(d.total)}</div>
-      <div class="pcb-count">${d.count} transaction${d.count>1?'s':''}</div>
+      <div class="pcb-count">${d.count} transaction${d.count>1?'s':''} — click for detail</div>
     </div>`).join('')||'<div style="padding:20px;font-size:0.8rem;color:var(--muted)">No data.</div>';
 }
 
@@ -1739,6 +1751,66 @@ async function loadFromSheet(projectName){
     setSyncStatus('live');
   }catch(e){ setSyncStatus('off'); }
   loading(false);
+}
+
+// ── PUSH ALL LOCAL DATA TO SHEETS ──
+async function pushAllToSheet(){
+  if(!SHEET_URL){ showToast('Connect Google Sheets first in Setup','error'); return; }
+  if(!activeProject){ showToast('Select a project first','error'); return; }
+  const tx = getActiveTx();
+  if(!tx.length){ showToast('No transactions to push','error'); return; }
+  setSyncStatus('syncing');
+  showToast('⬆️ Pushing all data to Sheets...','');
+  try{
+    await postToSheet({action:'bulk', project:activeProject, rows:tx});
+    setSyncStatus('live');
+    showToast(`✅ Pushed ${tx.length} transactions to Sheets!`,'success');
+  }catch(e){
+    setSyncStatus('off');
+    showToast('❌ Push failed. Check connection.','error');
+  }
+}
+
+// ── VENDOR DETAIL MODAL ──
+function showVendorDetail(name){
+  const tx = getActiveTx().filter(t=>t.debit&&(t.payee||'Unknown').trim()===name);
+  const total = tx.reduce((s,t)=>s+(t.debit||0),0);
+  tx.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const rows = tx.map((t,i)=>`
+    <tr>
+      <td>${i+1}</td>
+      <td>${t.date||'—'}</td>
+      <td>${t.check||'—'}</td>
+      <td><span class="tag ${setCatTag(t.category)}">${t.category||'—'}</span></td>
+      <td>${t.payment||'—'}</td>
+      <td>${t.notes||'—'}</td>
+      <td style="text-align:right;font-weight:700;color:var(--red)">${fmt(t.debit)}</td>
+    </tr>`).join('');
+  $('vendor-modal-title').textContent = '💸 '+name;
+  $('vendor-modal-body').innerHTML = `
+    <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:0.8rem;color:var(--muted)">${tx.length} transactions</span>
+      <span style="font-size:1.1rem;font-weight:800;color:var(--red)">${fmtS(total)}</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;font-size:0.73rem;border-collapse:collapse;">
+        <thead><tr style="background:var(--navy);color:#fff;">
+          <th style="padding:7px 8px;text-align:left">#</th>
+          <th style="padding:7px 8px;text-align:left">Date</th>
+          <th style="padding:7px 8px;text-align:left">Check/Ref</th>
+          <th style="padding:7px 8px;text-align:left">Category</th>
+          <th style="padding:7px 8px;text-align:left">Method</th>
+          <th style="padding:7px 8px;text-align:left">Notes</th>
+          <th style="padding:7px 8px;text-align:right">Amount</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="background:var(--navy-faint);font-weight:800;">
+          <td colspan="6" style="padding:8px;text-align:right">Total Paid to ${name}</td>
+          <td style="padding:8px;text-align:right;color:var(--red)">${fmtS(total)}</td>
+        </tr></tfoot>
+      </table>
+    </div>`;
+  openModal('vendor-modal');
 }
 
 // ── AUTO-SYNC: pull from Sheets every 60 seconds ──
