@@ -2336,8 +2336,15 @@ async function pullAllFromSheet(){
   showToast('⬇️ Pulling latest data from Sheets...','');
   try{
     // Step 1: Pull project list from Sheet first (source of truth)
-    const rp = await fetch(`${SHEET_URL}?type=projects&_=${Date.now()}`);
-    const dp = await rp.json();
+    const testUrl = `${SHEET_URL}?type=projects&_=${Date.now()}`;
+    let rp, dp;
+    try{
+      rp = await fetch(testUrl);
+      dp = await rp.json();
+    } catch(fetchErr){
+      alert('Fetch error:\n' + fetchErr.message + '\nURL: ' + testUrl.substring(0,80));
+      throw fetchErr;
+    }
     if(dp.status !== 'ok' || !dp.projects || !dp.projects.length){
       setSyncStatus('off');
       showToast('❌ No projects found in Sheet','error');
