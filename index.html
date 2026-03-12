@@ -431,6 +431,12 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
   .fab{ display:none!important; }
 }
 
+
+@media (pointer: coarse) and (max-width: 900px) {
+  #add-form-toggle-btn { display: none !important; }
+  #add-form-bar { display: none !important; }
+  #nav-push { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -1377,7 +1383,22 @@ function saveSheetUrl(){
   showToast('✓ Connected to Google Sheets!','success');
   setSyncStatus('live');
   checkConnBanner();
-  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){const pb=$('nav-push');if(pb)pb.style.display='none';}
+  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
+    // Mobile = Read Only mode
+    // Hide Push button
+    const pb=$('nav-push'); if(pb) pb.style.display='none';
+    // Hide Add Entry button
+    const addBtn=$('add-form-toggle-btn'); if(addBtn) addBtn.style.display='none';
+    // Hide add-form-bar in case it's open
+    const addBar=$('add-form-bar'); if(addBar) addBar.style.display='none!important';
+    // Add read-only banner
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#1a3a6e;color:#93c5fd;text-align:center;font-size:0.7rem;padding:5px;z-index:9998;letter-spacing:0.05em;';
+    banner.textContent='📱 Read-only mode — edits disabled on mobile';
+    document.body.appendChild(banner);
+    // Override addEntry to block saves
+    window._mobileReadOnly = true;
+  }
   // Run backups on startup
   saveLocalBackup();
   checkWeeklyBackup();
@@ -1916,6 +1937,7 @@ function toggleAddForm(){
 }
 
 async function addEntry(){
+  if(window._mobileReadOnly){ showToast('📱 Read-only on mobile — use desktop to add entries','error'); return; }
   if(!activeProject){ showToast('Select or create a project first','error'); return; }
   const date=$('f-date').value, payee=$('f-payee').value.trim();
   const typeVal=$('f-type').value.toLowerCase();
@@ -1965,6 +1987,7 @@ async function addEntry(){
 // SINGLE DELETE
 // ════════════════════════════════════════════
 function editTransaction(id){
+  if(window._mobileReadOnly){ showToast('📱 Read-only on mobile — use desktop to edit','error'); return; }
   const proj=projects.find(p=>p.name===activeProject);
   if(!proj) return;
   const t=proj.transactions.find(x=>x._id===id);
@@ -2013,6 +2036,7 @@ function saveTxEdit(id){
 }
 
 function openDelModal(id){
+  if(window._mobileReadOnly){ showToast('📱 Read-only on mobile — use desktop to delete','error'); return; }
   // Delete immediately with 10s undo (no modal needed)
   const proj = projects.find(p=>p.name===activeProject);
   if(!proj) return;
