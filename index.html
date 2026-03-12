@@ -1345,6 +1345,16 @@ function saveSheetUrl(){
   checkConnBanner();
 }
 
+function checkConnBanner(){
+  const banner = $('conn-banner');
+  if(!banner) return;
+  if(SHEET_URL){
+    banner.style.display = 'none';
+  } else {
+    banner.style.display = '';
+  }
+}
+
 // ════════════════════════════════════════════
 // PROJECTS
 // ════════════════════════════════════════════
@@ -1488,14 +1498,17 @@ function showView(v){
 // ════════════════════════════════════════════
 function renderDashboard(){
   const tx = getActiveTx();
-  const credits = tx.filter(t=>t.credit).reduce((s,t)=>s+(t.credit||0),0);
-  const debits  = tx.filter(t=>t.debit).reduce((s,t)=>s+(t.debit||0),0);
+  // Credits: entries with credit field OR category is 'Client payment'
+  const creditTx = tx.filter(t=>t.credit || (t.category||'').toLowerCase().includes('client payment'));
+  const debitTx  = tx.filter(t=>t.debit  && !(t.category||'').toLowerCase().includes('client payment'));
+  const credits = creditTx.reduce((s,t)=>s+(t.credit||t.debit||0),0);
+  const debits  = debitTx.reduce((s,t)=>s+(t.debit||0),0);
   const balance = credits - debits;
 
   $('d-credits').textContent = fmtS(credits);
-  $('d-credits-n').textContent = tx.filter(t=>t.credit).length+' payments';
+  $('d-credits-n').textContent = creditTx.length+' payments';
   $('d-debits').textContent = fmtS(debits);
-  $('d-debits-n').textContent = tx.filter(t=>t.debit).length+' expenses';
+  $('d-debits-n').textContent = debitTx.length+' expenses';
   $('d-balance').textContent = fmtS(Math.abs(balance));
   $('d-balance').className = 'dk-value '+(balance>=0?'green':'red');
 
@@ -2826,6 +2839,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   updateTopbarBadge();
   if(activeProject && !projects.find(p=>p.name===activeProject)) activeProject='';
   renderDashboard();
+  // Set initial sync status based on saved URL
+  if(SHEET_URL){ setSyncStatus('live'); } else { setSyncStatus('off'); }
+  checkConnBanner();
   // Auto-load from Sheets on startup if connected
   if(SHEET_URL){
     setSyncStatus('syncing');
