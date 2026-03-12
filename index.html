@@ -507,7 +507,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
     <!-- ══ DASHBOARD ══ -->
     <div class="view active" id="view-dashboard">
       <div class="dash-kpis">
-        <div class="dk"><div class="dk-label">💵 Received from Client</div><div class="dk-value green" id="d-credits">$0</div><div class="dk-sub" id="d-credits-n">0 payments</div></div>
+        <div class="dk"><div class="dk-label">💵 Received from Client</div><div class="dk-value green" id="d-credits">$0</div><div class="dk-sub" id="d-credits-n">0 payments</div><div id="d-credits-mismatch" style="display:none;margin-top:5px;font-size:0.6rem;border-radius:4px;padding:3px 7px;line-height:1.3;"></div></div>
         <div class="dk"><div class="dk-label">💸 Total Paid Out</div><div class="dk-value red" id="d-debits">$0</div><div class="dk-sub" id="d-debits-n">0 expenses</div></div>
         <div class="dk"><div class="dk-label">📊 Net Balance</div><div class="dk-value navy" id="d-balance">$0</div><div class="dk-sub">received − paid</div></div>
         <div class="dk"><div class="dk-label">📋 Total Contract Value</div><div class="dk-value blue" id="d-contract">$0</div><div class="dk-sub" id="d-contract-sub">See Customer Accounting</div></div>
@@ -585,7 +585,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
             </div>
             <div class="form-group">
               <label class="form-label">Type *</label>
-              <select class="form-input" id="f-type">
+              <select onchange="toggleClientPmtRow(this.value)" class="form-input" id="f-type">
                 <option value="Debit (expense out)">Debit (expense out)</option>
                 <option value="Credit (payment in)">Credit (payment in)</option>
               </select>
@@ -631,6 +631,10 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
               <input class="form-input" id="f-notes" placeholder="e.g. COBRAR, deposit, 10% milestone...">
             </div>
           </div>
+          <div id="f-client-pmt-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--blue-faint);border-radius:7px;margin-bottom:8px;">
+            <input type="checkbox" id="f-is-client-pmt" style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue);">
+            <label for="f-is-client-pmt" style="font-size:0.75rem;font-weight:600;color:var(--blue);cursor:pointer;">Register as Payment? <span style="font-weight:400;color:var(--muted)">(marks this credit as a client payment in the report)</span></label>
+          </div>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="addEntry()" id="save-btn">
               <span id="save-spinner" style="display:none" class="spinner-sm"></span>✓ Save Entry
@@ -673,6 +677,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
                 <th onclick="sortBy('credit')">Credit</th>
                 <th>Ref #</th>
                 <th>Notes</th>
+                <th class="ns" style="min-width:90px;font-size:0.65rem;color:var(--blue);white-space:nowrap;">Client Pmt?</th>
                 <th class="ns"></th>
               </tr>
             </thead>
@@ -1700,51 +1705,70 @@ function showView(v){
 // ════════════════════════════════════════════
 function renderDashboard(){
   const tx = getActiveTx();
-  // Credits: entries with credit field OR category is 'Client payment'
-  const creditTx = tx.filter(t=>t.credit || (t.category||'').toLowerCase().includes('client payment'));
-  const debitTx  = tx.filter(t=>t.debit  && !(t.category||'').toLowerCase().includes('client payment'));
-  const credits = creditTx.reduce((s,t)=>s+(t.credit||t.debit||0),0);
+  // Debits = all expenses from transactions
+  const debitTx = tx.filter(t=>t.debit);
   const debits  = debitTx.reduce((s,t)=>s+(t.debit||0),0);
-  const balance = credits - debits;
 
-  $('d-credits').textContent = fmtS(credits);
-  $('d-credits-n').textContent = creditTx.length+' payments';
+  // Contract value + client payments — both from Customer Accounting (CA draws)
+  const ca = getCA();
+  const coT    = ca ? (ca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
+  const allowB = ca ? (ca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0) : 0;
+  const allowA = ca ? (ca.allowances||[]).reduce((s,a)=>s+(a.actual!=null&&a.actual!==''?parseFloat(a.actual)||0:0),0) : 0;
+  const billT  = ca ? (ca.billables||[]).reduce((s,b)=>s+(b.amount||0),0) : 0;
+  const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
+
+  // Client payments received = Draws/Invoices in CA only (not transaction credits)
+  const clientPaid  = ca ? (ca.draws||[]).reduce((s,d)=>s+(d.amount||0),0) : 0;
+  const clientDraws = ca ? (ca.draws||[]).length : 0;
+
+  const balance = clientPaid - debits;
+
+  $('d-credits').textContent = fmtS(clientPaid);
+  $('d-credits-n').textContent = clientDraws + (clientDraws===1?' draw':' draws') + ' in CA';
+  // Mismatch warning: compare CA draws total vs transactions marked as client payments
+  const txClientPaid = getActiveTx().filter(t=>t.credit && t.isClientPayment).reduce((s,t)=>s+(t.credit||0),0);
+  const mismatch = $('d-credits-mismatch');
+  if(mismatch){
+    if(clientPaid === 0 && txClientPaid === 0){
+      mismatch.style.display = 'none';
+    } else if(Math.abs(clientPaid - txClientPaid) > 0.01){
+      mismatch.style.display = 'block';
+      mismatch.style.color = '#b45309'; mismatch.style.background = '#fef3c7';
+      mismatch.textContent = '⚠️ CA vs. transactions mismatch — review';
+    } else {
+      mismatch.style.display = 'block';
+      mismatch.style.color = '#166534'; mismatch.style.background = '#dcfce7';
+      mismatch.textContent = '✅ CA & transactions in sync';
+    }
+  }
   $('d-debits').textContent = fmtS(debits);
   $('d-debits-n').textContent = debitTx.length+' expenses';
   $('d-balance').textContent = fmtS(Math.abs(balance));
   $('d-balance').className = 'dk-value '+(balance>=0?'green':'red');
 
-  // Contract value from Customer Accounting
-  const ca = getCA();
-  const coT = ca ? ca.changeOrders.filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
-  const allowB = ca ? ca.allowances.reduce((s,a)=>s+(a.budget||0),0) : 0;
-  const allowA = ca ? ca.allowances.reduce((s,a)=>s+(a.actual!=null&&a.actual!==''?parseFloat(a.actual)||0:0),0) : 0;
-  const billT = ca ? ca.billables.reduce((s,b)=>s+(b.amount||0),0) : 0;
-  const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
   if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
 
-    // ── Bar 1: Spent vs Received ──
-  const svr_total = Math.max(debits, credits, 1);
-  const spentPct = Math.min((debits  / svr_total) * 100, 100);
-  const recvPct  = Math.min((credits / svr_total) * 100, 100);
+  // ── Bar 1: Spent vs Client Paid ──
+  const svr_total = Math.max(debits, clientPaid, 1);
+  const spentPct = Math.min((debits     / svr_total) * 100, 100);
+  const recvPct  = Math.min((clientPaid / svr_total) * 100, 100);
   $('prog-spent-bar').style.width = spentPct.toFixed(1) + '%';
   $('prog-recv-bar').style.width  = recvPct.toFixed(1)  + '%';
   $('prog-spent-pct').textContent = spentPct > 10 ? spentPct.toFixed(1) + '%' : '';
-  $('prog-spent-label').textContent = fmtS(debits) + ' spent \u00a0·\u00a0 ' + fmtS(credits) + ' received';
+  $('prog-spent-label').textContent = fmtS(debits) + ' spent  ·  ' + fmtS(clientPaid) + ' received';
   $('prog-spent-sub').textContent = fmtS(debits) + ' spent';
-  $('prog-recv-sub').textContent  = fmtS(credits) + ' received';
+  $('prog-recv-sub').textContent  = fmtS(clientPaid) + ' received from client';
 
-  // ── Bar 2: Received vs Total Contract ──
-  const recvContractPct = totalContractVal > 0 ? Math.min((credits / totalContractVal) * 100, 100) : 0;
+  // ── Bar 2: Client Payments Received vs Total Contract ──
+  const recvContractPct = totalContractVal > 0 ? Math.min((clientPaid / totalContractVal) * 100, 100) : 0;
   $('prog-recv-contract-bar').style.width = recvContractPct.toFixed(1) + '%';
   $('prog-recv-pct').textContent = recvContractPct > 8 ? recvContractPct.toFixed(1) + '%' : '';
-  $('prog-recv-label').textContent = fmtS(credits) + ' of ' + fmtS(totalContractVal);
+  $('prog-recv-label').textContent = fmtS(clientPaid) + ' of ' + fmtS(totalContractVal);
   $('prog-recv-contract-sub').textContent = totalContractVal > 0
-    ? `${recvContractPct.toFixed(1)}% collected — ${fmtS(totalContractVal - credits)} pending`
+    ? recvContractPct.toFixed(1) + '% collected — ' + fmtS(totalContractVal - clientPaid) + ' pending'
     : 'Set Total Contract Value in Customer Accounting';
 }
-
 
 function toggleAccordion(id, btn){
   const el=$(id);
@@ -1793,6 +1817,22 @@ function clearFilters(){
 
 function sortBy(col){ sortDir=(sortCol===col)?sortDir*-1:-1; sortCol=col; applyFilters(); }
 
+function toggleClientPmtRow(val){
+  const row = $('f-client-pmt-row');
+  if(!row) return;
+  row.style.display = val.toLowerCase().includes('credit') ? 'flex' : 'none';
+  if(!val.toLowerCase().includes('credit')) $('f-is-client-pmt').checked = false;
+}
+
+function toggleClientPayment(id, el){
+  const proj = projects.find(p=>p.name===activeProject);
+  if(!proj) return;
+  const t = proj.transactions.find(t=>t._id===id);
+  if(!t) return;
+  t.isClientPayment = el.checked;
+  saveProjects();
+}
+
 function renderTable(){
   const start=(page-1)*pageSize, slice=filteredData.slice(start,start+pageSize);
   const tx = getActiveTx();
@@ -1818,6 +1858,7 @@ function renderTable(){
       <td class="${t.credit?'amount-credit':''}">${t.credit!=null?fmt(t.credit):'—'}</td>
       <td style="color:var(--muted);font-size:0.65rem">${t.check||'—'}</td>
       <td class="wrap">${isCobrar?'<span class="tag tag-cobrar" style="margin-right:3px">COBRAR</span>':''}${(t.notes||'').replace(/COBRAR/gi,'').trim()||''}</td>
+      <td class="ns" style="text-align:center;">${t.credit!=null?`<label style="display:flex;align-items:center;gap:4px;justify-content:center;cursor:pointer;font-size:0.68rem;color:var(--blue);white-space:nowrap;"><input type="checkbox" ${t.isClientPayment?'checked':''} onchange="toggleClientPayment(${t._id},this)" style="cursor:pointer;accent-color:var(--blue);"> Client</label>`:'<span style="color:var(--border);">—</span>'}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="editTransaction(${t._id})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="openDelModal(${t._id})" style="color:var(--red);padding:3px 7px;">✕</button></td>
     </tr>`;
   }).join('');
@@ -1914,11 +1955,13 @@ async function addEntry(){
   const isCredit = typeVal.includes('credit');
   const proj = projects.find(p=>p.name===activeProject);
   const maxNro = proj.transactions.length>0?Math.max(...proj.transactions.map(t=>Number(t.nro)||0)):0;
+  const isClientPmt = isCredit && $('f-is-client-pmt') && $('f-is-client-pmt').checked;
   const entry={
     _id: Date.now(), nro: maxNro+1, date, payee, category,
     debit: isCredit?null:amount, credit: isCredit?amount:null,
     payment:$('f-payment').value.trim(), bank:$('f-bank').value.trim(),
-    check:$('f-check').value.trim(), notes:$('f-notes').value.trim()
+    check:$('f-check').value.trim(), notes:$('f-notes').value.trim(),
+    isClientPayment: isClientPmt || false
   };
   proj.transactions.push(entry);
   saveProjects();
@@ -1941,6 +1984,8 @@ async function addEntry(){
   }
   ['f-payee','f-amount','f-check','f-notes'].forEach(id=>$(id).value='');
   $('f-category').value=''; $('f-type').value='Debit (expense out)';
+  if($('f-is-client-pmt')) $('f-is-client-pmt').checked = false;
+  toggleClientPmtRow('Debit');
   $('f-date').value=new Date().toISOString().substring(0,10);
   $('f-payee').focus();
 }
@@ -2018,6 +2063,51 @@ async function confirmDelete(){
 // ════════════════════════════════════════════
 // BREAKDOWN
 // ════════════════════════════════════════════
+function showVendorDetail(name){
+  const tx = getActiveTx().filter(t=>t.debit && (t.payee||'Unknown').trim()===name);
+  const total = tx.reduce((s,t)=>s+(t.debit||0),0);
+  tx.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const rows = tx.map((t,i)=>`
+    <tr>
+      <td style="padding:7px 8px;">${i+1}</td>
+      <td style="padding:7px 8px;">${t.date||'—'}</td>
+      <td style="padding:7px 8px;">${t.check||'—'}</td>
+      <td style="padding:7px 8px;"><span class="tag ${setCatTag(t.category)}">${t.category||'—'}</span></td>
+      <td style="padding:7px 8px;">${t.payment||'—'}</td>
+      <td style="padding:7px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.notes||'—'}</td>
+      <td style="padding:7px 8px;text-align:right;font-weight:700;color:var(--red);">${fmt(t.debit)}</td>
+    </tr>`).join('');
+  $('vendor-modal-title').textContent = '💸 ' + name;
+  $('vendor-modal-body').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <span style="font-size:0.8rem;color:var(--muted);">${tx.length} transaction${tx.length!==1?'s':''}</span>
+      <span style="font-size:1.1rem;font-weight:800;color:var(--red);">${fmtS(total)}</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;font-size:0.73rem;border-collapse:collapse;">
+        <thead>
+          <tr style="background:var(--navy);color:#fff;">
+            <th style="padding:7px 8px;text-align:left;">#</th>
+            <th style="padding:7px 8px;text-align:left;">Date</th>
+            <th style="padding:7px 8px;text-align:left;">Check/Ref</th>
+            <th style="padding:7px 8px;text-align:left;">Category</th>
+            <th style="padding:7px 8px;text-align:left;">Method</th>
+            <th style="padding:7px 8px;text-align:left;">Notes</th>
+            <th style="padding:7px 8px;text-align:right;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="background:var(--navy-faint);font-weight:800;">
+            <td colspan="6" style="padding:8px 12px;text-align:right;">Total paid to ${name}</td>
+            <td style="padding:8px 12px;text-align:right;color:var(--red);">${fmtS(total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+  openModal('vendor-modal');
+}
+
 function renderBreakdown(){
   const tx=getActiveTx();
   const catMap={};
@@ -2048,9 +2138,13 @@ function renderBreakdown(){
 // ════════════════════════════════════════════
 function renderReport(){
   const tx=getActiveTx();
-  const credits=tx.filter(t=>t.credit).reduce((s,t)=>s+(t.credit||0),0);
+  // Client payments = only those marked with isClientPayment checkbox
+  const clientPmtTx  = tx.filter(t=>t.credit && t.isClientPayment);
+  const otherCreditTx = tx.filter(t=>t.credit && !t.isClientPayment);
+  const clientPaid   = clientPmtTx.reduce((s,t)=>s+(t.credit||0),0);
+  const otherCredits = otherCreditTx.reduce((s,t)=>s+(t.credit||0),0);
   const debits=tx.filter(t=>t.debit).reduce((s,t)=>s+(t.debit||0),0);
-  const balance=credits-debits;
+  const balance=clientPaid+otherCredits-debits;
   const catMap={}; tx.filter(t=>t.debit).forEach(t=>{ const c=t.category||'Other'; catMap[c]=(catMap[c]||0)+t.debit; });
   const cats=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const cobrar=tx.filter(t=>(t.notes||'').toUpperCase().includes('COBRAR'));
@@ -2059,12 +2153,20 @@ function renderReport(){
   const range=dates.length?dates[0]+' → '+dates[dates.length-1]:'—';
   const payMap={};tx.filter(t=>t.debit).forEach(t=>{const p=t.payment||'—';payMap[p]=(payMap[p]||0)+t.debit;});
 
+  const otherCreditsSection = otherCreditTx.length ? `
+    <div class="report-h2">Other Credits</div>
+    <table class="sum-table">
+      ${otherCreditTx.map(t=>`<tr><td>${t.date||'—'} &nbsp;${t.payee||'—'} &nbsp;<span style="color:var(--muted);font-size:0.7rem">${t.notes||''}</span></td><td class="amount-credit">${fmt(t.credit)}</td></tr>`).join('')}
+      <tr class="sub"><td>Total Other Credits</td><td class="amount-credit">${fmt(otherCredits)}</td></tr>
+    </table>` : '';
+
   $('report-content').innerHTML=`
     <div class="report-h1">📋 ${activeProject||'Project'} — Financial Report</div>
     <div class="report-meta">Generated: ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})} &nbsp;|&nbsp; Period: ${range} &nbsp;|&nbsp; ${tx.length} entries</div>
     <div class="report-h2">Summary</div>
     <table class="sum-table">
-      <tr><td>Total Received from Client</td><td class="amount-credit">${fmt(credits)}</td></tr>
+      <tr><td>Total Received from Client</td><td class="amount-credit">${fmt(clientPaid)}</td></tr>
+      ${otherCredits>0?`<tr><td>Other Credits</td><td class="amount-credit">${fmt(otherCredits)}</td></tr>`:''}
       <tr><td>Total Paid Out</td><td class="amount-debit">${fmt(debits)}</td></tr>
       <tr class="grand"><td>Net Balance</td><td class="${balance>=0?'amount-credit':'amount-debit'}">${fmt(balance)}</td></tr>
     </table>
@@ -2084,9 +2186,10 @@ function renderReport(){
     </table>
     <div class="report-h2">Client Payments Received</div>
     <table class="sum-table">
-      ${tx.filter(t=>t.credit).map(t=>`<tr><td>${t.date} &nbsp;${t.notes||t.payee||'—'}</td><td class="amount-credit">${fmt(t.credit)}</td></tr>`).join('')}
-      <tr class="grand"><td>Total Received</td><td>${fmt(credits)}</td></tr>
+      ${clientPmtTx.length ? clientPmtTx.map(t=>`<tr><td>${t.date||'—'} &nbsp;${t.payee||'—'} &nbsp;<span style="color:var(--muted);font-size:0.7rem">${t.notes||''}</span></td><td class="amount-credit">${fmt(t.credit)}</td></tr>`).join('') : '<tr><td colspan="2" style="color:var(--muted);font-style:italic;">No payments marked as client payments yet.<br>Use the ✓ Register as Payment? checkbox in Transactions.</td></tr>'}
+      <tr class="grand"><td>Total Received from Client</td><td class="amount-credit">${fmt(clientPaid)}</td></tr>
     </table>
+    ${otherCreditsSection}
     <div class="report-h2">All Transactions</div>
     <div style="overflow-x:auto"><table class="sum-table" style="font-size:0.68rem">
       <tr style="background:var(--navy);color:#fff"><td><b>#</b></td><td><b>Date</b></td><td><b>Payee</b></td><td><b>Category</b></td><td><b>Debit</b></td><td><b>Credit</b></td><td><b>Bank</b></td><td><b>Method</b></td><td><b>Notes</b></td></tr>
