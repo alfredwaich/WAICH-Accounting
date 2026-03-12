@@ -1830,7 +1830,7 @@ function renderTable(){
       <td class="${t.debit?'amount-debit':''}">${t.debit!=null?fmt(t.debit):'—'}</td>
       <td class="${t.credit?'amount-credit':''}">${t.credit!=null?fmt(t.credit):'—'}</td>
       <td style="color:var(--muted);font-size:0.65rem">${t.check||'—'}</td>
-      <td class="wrap">${isCobrar?'<span class="tag tag-cobrar" style="margin-right:3px">COBRAR</span>':''}${(t.notes||'').replace(/COBRAR/gi,'').trim()||''}</td>
+      <td class="wrap">${isCobrar?'<span class="tag tag-cobrar" style="margin-right:3px">COBRAR</span>':''}${String(t.notes||'').replace(/COBRAR/gi,'').trim()||''}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="editTransaction(${t._id})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="openDelModal(${t._id})" style="color:var(--red);padding:3px 7px;">✕</button></td>
     </tr>`;
   }).join('');
