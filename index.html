@@ -1316,6 +1316,20 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
 // ════════════════════════════════════════════
 // projects: { name: string, transactions: [] }[]
 let projects = JSON.parse(localStorage.getItem('wc_projects') || '[]');
+
+// ── Mobile Read-Only Mode ──
+const _isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+if(_isMobile){
+  window._mobileReadOnly = true;
+  document.addEventListener('DOMContentLoaded', function(){
+    const pb=$('nav-push'); if(pb) pb.style.display='none';
+    const addBtn=$('add-form-toggle-btn'); if(addBtn) addBtn.style.display='none';
+    const banner=document.createElement('div');
+    banner.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#1a3a6e;color:#93c5fd;text-align:center;font-size:0.7rem;padding:6px;z-index:9998;letter-spacing:0.05em;font-family:DM Mono,monospace;';
+    banner.textContent='📱 Read-only mode — use desktop to add or edit';
+    document.body.appendChild(banner);
+  });
+}
 let activeProject = localStorage.getItem('wc_active') || '';
 let filteredData = [];
 let sortCol = 'date', sortDir = -1;
@@ -1382,22 +1396,7 @@ function saveSheetUrl(){
   if(window.innerWidth > 900){
     const pb=$('nav-push'); if(pb) pb.style.display='';
   }
-  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
-    // Mobile = Read Only mode
-    // Hide Push button
-    const pb=$('nav-push'); if(pb) pb.style.display='none';
-    // Hide Add Entry button
-    const addBtn=$('add-form-toggle-btn'); if(addBtn) addBtn.style.display='none';
-    // Hide add-form-bar in case it's open
-    const addBar=$('add-form-bar'); if(addBar) addBar.style.display='none!important';
-    // Add read-only banner
-    const banner=document.createElement('div');
-    banner.style.cssText='position:fixed;bottom:0;left:0;right:0;background:#1a3a6e;color:#93c5fd;text-align:center;font-size:0.7rem;padding:5px;z-index:9998;letter-spacing:0.05em;';
-    banner.textContent='📱 Read-only mode — edits disabled on mobile';
-    document.body.appendChild(banner);
-    // Override addEntry to block saves
-    window._mobileReadOnly = true;
-  }
+
   // Run backups on startup
   saveLocalBackup();
   checkWeeklyBackup();
