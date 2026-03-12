@@ -1334,6 +1334,17 @@ function setSyncStatus(state){
   $('sync-label').textContent = state==='live'?'Synced with Sheets':state==='syncing'?'Syncing...':'Not connected';
 }
 
+function saveSheetUrl(){
+  const val = ($('sheets-url-input').value||'').trim();
+  if(!val){ showToast('Paste your Apps Script URL first','error'); return; }
+  if(!val.startsWith('https://script.google.com')){ showToast('URL must start with https://script.google.com','error'); return; }
+  SHEET_URL = val;
+  localStorage.setItem('wc_sheet_url', SHEET_URL);
+  showToast('✓ Connected to Google Sheets!','success');
+  setSyncStatus('live');
+  checkConnBanner();
+}
+
 // ════════════════════════════════════════════
 // PROJECTS
 // ════════════════════════════════════════════
