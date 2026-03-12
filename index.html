@@ -431,19 +431,6 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
   .fab{ display:none!important; }
 }
 
-
-.pin-box {
-  width: 48px; height: 56px;
-  font-size: 1.5rem; font-weight: 800;
-  text-align: center;
-  border: 2px solid var(--border);
-  border-radius: 10px;
-  background: var(--navy-faint);
-  color: var(--navy);
-  outline: none;
-  transition: border-color 0.15s;
-}
-.pin-box:focus { border-color: var(--blue); background: #fff; }
 </style>
 </head>
 <body>
@@ -644,7 +631,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
               <input class="form-input" id="f-notes" placeholder="e.g. COBRAR, deposit, 10% milestone...">
             </div>
           </div>
-          <div id="f-client-pmt-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--blue-faint);border-radius:7px;margin-bottom:8px;"><input type="checkbox" id="f-is-client-pmt" style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue);"><label for="f-is-client-pmt" style="font-size:0.75rem;font-weight:600;color:var(--blue);cursor:pointer;">Register as Client Payment? <span style="font-weight:400;color:var(--muted)">(marks as client payment in report & dashboard)</span></label></div>
+          <div id="f-client-pmt-row" style="display:none;align-items:center;gap:8px;padding:8px 12px;background:var(--blue-faint);border-radius:7px;margin-bottom:8px;"><input type="checkbox" id="f-is-client-pmt" style="width:16px;height:16px;cursor:pointer;accent-color:var(--blue);"><label for="f-is-client-pmt" style="font-size:0.75rem;font-weight:600;color:var(--blue);cursor:pointer;">Register as Client Payment? <span style="font-weight:400;color:var(--muted)">(marks as client payment in dashboard)</span></label></div>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="addEntry()" id="save-btn">
               <span id="save-spinner" style="display:none" class="spinner-sm"></span>✓ Save Entry
@@ -1336,8 +1323,7 @@ if(_isMobile){
   document.addEventListener('DOMContentLoaded', function(){
     const pb=$('nav-push'); if(pb) pb.style.display='none';
     const addBtn=$('add-form-toggle-btn'); if(addBtn) addBtn.style.display='none';
-    // Show projects button in topbar
-    document.querySelectorAll('.mn-projects-btn').forEach(el=>el.style.display='flex');
+    const fab=document.querySelector('.fab'); if(fab) fab.style.display='none';
   });
 }
 let activeProject = localStorage.getItem('wc_active') || '';
@@ -1725,20 +1711,17 @@ function showView(v){
 // ════════════════════════════════════════════
 function renderDashboard(){
   const tx = getActiveTx();
-  const debitTx  = tx.filter(t=>t.debit);
+  const debitTx = tx.filter(t=>t.debit);
   const clientPmtTx = tx.filter(t=>t.credit && t.isClientPayment);
-  const debits   = debitTx.reduce((s,t)=>s+(t.debit||0),0);
+  const debits = debitTx.reduce((s,t)=>s+(t.debit||0),0);
   const clientPaid = clientPmtTx.reduce((s,t)=>s+(t.credit||0),0);
-  const balance  = clientPaid - debits;
-
+  const balance = clientPaid - debits;
   $('d-credits').textContent = fmtS(clientPaid);
   $('d-credits-n').textContent = clientPmtTx.length+(clientPmtTx.length===1?' payment':' payments')+' marked';
   $('d-debits').textContent = fmtS(debits);
   $('d-debits-n').textContent = debitTx.length+' expenses';
   $('d-balance').textContent = fmtS(Math.abs(balance));
   $('d-balance').className = 'dk-value '+(balance>=0?'green':'red');
-
-  // Contract value from Customer Accounting
   const ca = getCA();
   const coT    = ca ? (ca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
   const allowB = ca ? (ca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0) : 0;
@@ -1746,42 +1729,29 @@ function renderDashboard(){
   const billT  = ca ? (ca.billables||[]).reduce((s,b)=>s+(b.amount||0),0) : 0;
   const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
-  if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
-
-  // Bar 1: Spent vs Received
+  if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0?'initial + COs + allowances + billables':'Set in Customer Accounting';
   const svr_total = Math.max(debits, clientPaid, 1);
-  const spentPct  = Math.min((debits/svr_total)*100, 100);
-  const recvPct   = Math.min((clientPaid/svr_total)*100, 100);
+  const spentPct = Math.min((debits/svr_total)*100,100);
+  const recvPct  = Math.min((clientPaid/svr_total)*100,100);
   $('prog-spent-bar').style.width = spentPct.toFixed(1)+'%';
   $('prog-recv-bar').style.width  = recvPct.toFixed(1)+'%';
-  $('prog-spent-pct').textContent = spentPct>10 ? spentPct.toFixed(1)+'%' : '';
+  $('prog-spent-pct').textContent = spentPct>10?spentPct.toFixed(1)+'%':'';
   $('prog-spent-label').textContent = fmtS(debits)+' spent  ·  '+fmtS(clientPaid)+' received';
   $('prog-spent-sub').textContent = fmtS(debits)+' spent';
   $('prog-recv-sub').textContent  = fmtS(clientPaid)+' received from client';
-
-  // Bar 2: Received vs Total Contract
-  const recvContractPct = totalContractVal>0 ? Math.min((clientPaid/totalContractVal)*100,100) : 0;
+  const recvContractPct = totalContractVal>0?Math.min((clientPaid/totalContractVal)*100,100):0;
   $('prog-recv-contract-bar').style.width = recvContractPct.toFixed(1)+'%';
-  $('prog-recv-pct').textContent = recvContractPct>8 ? recvContractPct.toFixed(1)+'%' : '';
+  $('prog-recv-pct').textContent = recvContractPct>8?recvContractPct.toFixed(1)+'%':'';
   $('prog-recv-label').textContent = fmtS(clientPaid)+' of '+fmtS(totalContractVal);
   $('prog-recv-contract-sub').textContent = totalContractVal>0
     ? recvContractPct.toFixed(1)+'% collected — '+fmtS(totalContractVal-clientPaid)+' pending'
     : 'Set Total Contract Value in Customer Accounting';
-
-  // Mismatch warning: CA draws vs transactions marked as client payment
   const caDraws = ca ? (ca.draws||[]).reduce((s,d)=>s+(d.amount||0),0) : 0;
   const mm = $('d-credits-mismatch');
   if(mm){
-    if(caDraws===0 && clientPaid===0){ mm.style.display='none'; }
-    else if(Math.abs(caDraws-clientPaid)>0.01){
-      mm.style.display='block';
-      mm.style.background='#fef3c7'; mm.style.color='#b45309';
-      mm.textContent='⚠️ CA draws vs transactions mismatch — review';
-    } else {
-      mm.style.display='block';
-      mm.style.background='#dcfce7'; mm.style.color='#166534';
-      mm.textContent='✅ CA & transactions in sync';
-    }
+    if(caDraws===0&&clientPaid===0){ mm.style.display='none'; }
+    else if(Math.abs(caDraws-clientPaid)>0.01){ mm.style.display='block';mm.style.background='#fef3c7';mm.style.color='#b45309';mm.textContent='⚠️ CA draws vs transactions mismatch — review'; }
+    else{ mm.style.display='block';mm.style.background='#dcfce7';mm.style.color='#166534';mm.textContent='✅ CA & transactions in sync'; }
   }
 }
 
@@ -1860,7 +1830,7 @@ function renderTable(){
       <td><span class="tag tag-pay">${t.payment||'—'}</span></td>
       <td><span class="tag tag-bank">${t.bank||'—'}</span></td>
       <td class="${t.debit?'amount-debit':''}">${t.debit!=null?fmt(t.debit):'—'}</td>
-      <td class="${t.credit?'amount-credit':''}">${t.credit!=null?fmt(t.credit):'—'}${t.credit&&t.isClientPayment?' <span title="Client Payment" style="font-size:0.65rem;background:#dcfce7;color:#166534;border-radius:3px;padding:1px 4px;">✓ pmt</span>':''}</td>
+      <td class="${t.credit?'amount-credit':''}">${t.credit!=null?fmt(t.credit):'—'}${t.credit&&t.isClientPayment?' <span style="font-size:0.6rem;background:#dcfce7;color:#166534;border-radius:3px;padding:1px 4px;">✓pmt</span>':''}</td>
       <td style="color:var(--muted);font-size:0.65rem">${t.check||'—'}</td>
       <td class="wrap">${isCobrar?'<span class="tag tag-cobrar" style="margin-right:3px">COBRAR</span>':''}${String(t.notes||'').replace(/COBRAR/gi,'').trim()||''}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="editTransaction(${t._id})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="openDelModal(${t._id})" style="color:var(--red);padding:3px 7px;">✕</button></td>
@@ -2074,14 +2044,12 @@ function showVendorDetail(name){
   const total=tx.reduce((s,t)=>s+(t.debit||0),0);
   tx.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   const rows=tx.map((t,i)=>`<tr>
-    <td style="padding:6px 8px">${i+1}</td>
-    <td style="padding:6px 8px">${t.date||'—'}</td>
+    <td style="padding:6px 8px">${i+1}</td><td style="padding:6px 8px">${t.date||'—'}</td>
     <td style="padding:6px 8px">${t.check||'—'}</td>
     <td style="padding:6px 8px"><span class="tag ${setCatTag(t.category)}">${t.category||'—'}</span></td>
     <td style="padding:6px 8px">${t.payment||'—'}</td>
     <td style="padding:6px 8px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${String(t.notes||'—')}</td>
-    <td style="padding:6px 8px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.debit)}</td>
-  </tr>`).join('');
+    <td style="padding:6px 8px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.debit)}</td></tr>`).join('');
   $('vendor-modal-title').textContent='💸 '+name;
   $('vendor-modal-body').innerHTML=`
     <div style="display:flex;justify-content:space-between;margin-bottom:12px">
@@ -2090,23 +2058,16 @@ function showVendorDetail(name){
     </div>
     <div style="overflow-x:auto"><table style="width:100%;font-size:0.72rem;border-collapse:collapse">
       <thead><tr style="background:var(--navy);color:#fff">
-        <th style="padding:7px 8px">#</th>
-        <th style="padding:7px 8px">Date</th>
-        <th style="padding:7px 8px">Ref</th>
-        <th style="padding:7px 8px">Category</th>
-        <th style="padding:7px 8px">Method</th>
-        <th style="padding:7px 8px">Notes</th>
-        <th style="padding:7px 8px;text-align:right">Amount</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
+        <th style="padding:7px 8px">#</th><th style="padding:7px 8px">Date</th><th style="padding:7px 8px">Ref</th>
+        <th style="padding:7px 8px">Category</th><th style="padding:7px 8px">Method</th>
+        <th style="padding:7px 8px">Notes</th><th style="padding:7px 8px;text-align:right">Amount</th>
+      </tr></thead><tbody>${rows}</tbody>
       <tfoot><tr style="background:var(--navy-faint);font-weight:800">
         <td colspan="6" style="padding:8px;text-align:right">Total paid to ${name}</td>
         <td style="padding:8px;text-align:right;color:var(--red)">${fmtS(total)}</td>
-      </tr></tfoot>
-    </table></div>`;
+      </tr></tfoot></table></div>`;
   openModal('vendor-modal');
 }
-
 function renderBreakdown(){
   const tx=getActiveTx();
   const catMap={};
@@ -2278,9 +2239,6 @@ async function loadFromSheet(projectName){
 
 // ── PUSH ALL LOCAL DATA TO SHEETS ──
 async function pushAllToSheet(){
-  requirePin(()=> _doPushAllToSheet());
-}
-async function _doPushAllToSheet(){
   if(!SHEET_URL){ showToast('Connect Google Sheets first in Setup','error'); return; }
   if(!projects.length){ showToast('No projects to push','error'); return; }
   setSyncStatus('syncing');
@@ -2860,19 +2818,6 @@ document.addEventListener('DOMContentLoaded',()=>{
 </script>
 
 <!-- ═══ MOBILE BOTTOM NAV ═══ -->
-<!-- More Menu Popup -->
-<div id="mn-more-menu" style="display:none;position:fixed;bottom:68px;left:0;right:0;background:var(--navy2);border-radius:14px 14px 0 0;z-index:9999;box-shadow:0 -4px 24px rgba(0,0,0,0.4);">
-  <div style="padding:10px 20px 4px;font-size:0.6rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.08em;">More</div>
-  <button onclick="mobileNav('setup');closeMobileMore();" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#fff;font-size:0.9rem;font-family:'DM Mono',monospace;cursor:pointer;border-top:1px solid rgba(255,255,255,0.07);">
-    <span style="font-size:1.3rem">⚙️</span> Google Sheets Setup
-  </button>
-  <button onclick="pullAllFromSheet();closeMobileMore();" style="width:100%;display:flex;align-items:center;gap:14px;padding:14px 20px;background:none;border:none;color:#60a5fa;font-size:0.9rem;font-family:'DM Mono',monospace;cursor:pointer;border-top:1px solid rgba(255,255,255,0.07);">
-    <span style="font-size:1.3rem">⬇️</span> Pull from Sheets
-  </button>
-  <div style="height:env(safe-area-inset-bottom,8px)"></div>
-</div>
-<div id="mn-more-backdrop" onclick="closeMobileMore()" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.4);"></div>
-
 <nav class="mobile-nav">
   <button class="mn-item" onclick="mobileNav('dashboard')" id="mn-dashboard">
     <span class="mn-icon">📊</span><span>Dashboard</span>
@@ -2886,8 +2831,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   <button class="mn-item" onclick="mobileNav('projects')" id="mn-projects">
     <span class="mn-icon">🏗️</span><span>Projects</span>
   </button>
-  <button class="mn-item" id="mn-more-btn" onclick="toggleMobileMore()">
-    <span class="mn-icon">⚙️</span><span>More</span>
+  <button class="mn-item" onclick="mobileNav('permits')" id="mn-permits">
+    <span class="mn-icon">📋</span><span>Permits</span>
+  </button>
+  <button class="mn-item" onclick="mobileNav('setup')" id="mn-setup">
+    <span class="mn-icon">⚙️</span><span>Setup</span>
   </button>
 </nav>
 
@@ -2906,14 +2854,13 @@ let editingTaskIdx = null;
 <script>
 // Mobile nav helper
 function mobileNav(view){
-  closeMobileMore();
   showView(view);
   // update bottom nav active state
   document.querySelectorAll('.mn-item').forEach(b=>b.classList.remove('active'));
   const btn = document.getElementById('mn-'+view);
   if(btn) btn.classList.add('active');
   // show/hide FAB
-  document.querySelector('.fab').style.display = (view==='transactions') ? 'flex' : 'none';
+  const fab=document.querySelector('.fab'); if(fab) fab.style.display=(view==='transactions')?'flex':'none';
   // track body class for FAB visibility
   document.body.className = 'view-'+view;
 }
@@ -2927,51 +2874,6 @@ function mobileNav(view){
     document.body.className = 'view-'+id;
   }
 })();
-
-// ── PIN PROTECTION ──
-const PIN_KEY = 'wc_push_pin';
-function getPIN(){ return localStorage.getItem(PIN_KEY) || '1500'; }
-function setPIN(p){ localStorage.setItem(PIN_KEY, p); }
-
-let _pinCallback = null;
-
-function requirePin(callback){
-  _pinCallback = callback;
-  ['pin-1','pin-2','pin-3','pin-4'].forEach(id=>{ $(id).value=''; });
-  $('pin-error').textContent = '';
-  $('pin-modal').style.display = 'flex';
-  setTimeout(()=>$('pin-1').focus(), 100);
-}
-function closePinModal(){
-  $('pin-modal').style.display = 'none';
-  _pinCallback = null;
-}
-function pinNext(el, nextId){
-  if(el.value.length === 1 && nextId) $(nextId).focus();
-  if(!nextId) submitPin();
-}
-function pinKey(e, el, prevId, nextId){
-  if(e.key === 'Backspace' && el.value === '' && prevId) $(prevId).focus();
-  if(e.key === 'Enter') submitPin();
-}
-function submitPin(){
-  const entered = ['pin-1','pin-2','pin-3','pin-4'].map(id=>$(id).value).join('');
-  if(entered.length < 4){ $('pin-error').textContent = 'Enter all 4 digits'; return; }
-  if(entered === getPIN()){
-    closePinModal();
-    if(_pinCallback) _pinCallback();
-  } else {
-    $('pin-error').textContent = '❌ Wrong PIN — try again';
-    ['pin-1','pin-2','pin-3','pin-4'].forEach(id=>$(id).value='');
-    $('pin-1').focus();
-  }
-}
-function changePin(){
-  const np = prompt('Enter new 4-digit PIN:');
-  if(!np || !/^\d{4}$/.test(np)){ showToast('PIN must be exactly 4 digits','error'); return; }
-  setPIN(np);
-  showToast('✅ PIN updated successfully','success');
-}
 </script>
 <!-- Project Delete Modal -->
 <div class="modal-overlay" id="proj-del-modal" onclick="if(event.target===this)closeModal('proj-del-modal')">
@@ -3008,25 +2910,5 @@ function changePin(){
     <div id="undo-progress" style="position:absolute;bottom:0;left:0;height:3px;
       background:#4ade80;border-radius:0 0 10px 10px;width:100%;"></div>
   </div>
-
-<!-- PIN Modal -->
-<div class="modal-overlay" id="pin-modal" style="display:none;z-index:10000;">
-  <div class="modal" style="max-width:320px;text-align:center;">
-    <div class="modal-title">🔐 Enter PIN</div>
-    <div style="font-size:0.75rem;color:var(--muted);margin-bottom:18px;">Required to push data to Google Sheets</div>
-    <div style="display:flex;gap:10px;justify-content:center;margin-bottom:18px;">
-      <input type="password" maxlength="1" id="pin-1" class="pin-box" oninput="pinNext(this,'pin-2')" onkeydown="pinKey(event,this,null,'pin-2')">
-      <input type="password" maxlength="1" id="pin-2" class="pin-box" oninput="pinNext(this,'pin-3')" onkeydown="pinKey(event,this,'pin-1','pin-3')">
-      <input type="password" maxlength="1" id="pin-3" class="pin-box" oninput="pinNext(this,'pin-4')" onkeydown="pinKey(event,this,'pin-2','pin-4')">
-      <input type="password" maxlength="1" id="pin-4" class="pin-box" oninput="pinNext(this,null)"   onkeydown="pinKey(event,this,'pin-3',null)">
-    </div>
-    <div id="pin-error" style="color:var(--red);font-size:0.75rem;min-height:18px;margin-bottom:12px;"></div>
-    <div style="display:flex;gap:8px;justify-content:center;">
-      <button class="btn btn-ghost" onclick="closePinModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitPin()">✓ Confirm</button>
-    </div>
-    
-  </div>
-</div>
 </body>
 </html>
