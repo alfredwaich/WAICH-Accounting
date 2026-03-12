@@ -1420,12 +1420,17 @@ let _pendingDeleteProject = null;
 function deleteProject(name){
   _pendingDeleteProject = name;
   $('proj-del-name').textContent = name;
+  // Show Sheets option only if connected
+  const sheetsOpt = $('proj-del-sheets-opt');
+  if(SHEET_URL){ sheetsOpt.style.display='block'; $('del-sheets-no').checked=true; }
+  else { sheetsOpt.style.display='none'; }
   openModal('proj-del-modal');
 }
 
 function confirmDeleteProject(){
   const name = _pendingDeleteProject;
   if(!name) return;
+  const deleteSheets = SHEET_URL && $('del-sheets-yes') && $('del-sheets-yes').checked;
   closeModal('proj-del-modal');
   _pendingDeleteProject = null;
   projects = projects.filter(p=>p.name!==name);
@@ -1438,8 +1443,13 @@ function confirmDeleteProject(){
   renderProjectsGrid();
   refreshAll();
   showToast(`Project "${name}" deleted`);
+  // Delete sheets only if user chose to
+  if(deleteSheets){
+    postToSheet({action:'delete_project', project:name})
+      .then(()=>showToast(`✓ Sheets for "${name}" also deleted`,'success'))
+      .catch(()=>showToast('Project deleted locally — Sheets delete failed','error'));
+  }
 }
-
 function refreshAll(){
   applyFilters();
   renderDashboard();
@@ -1992,25 +2002,22 @@ async function pushAllToSheet(){
   setSyncStatus('syncing');
   showToast('⬆️ Pushing all data to Sheets...','');
   try{
-    // Push project list
+    // Push project list + permits integrados en cada proyecto
     await postToSheet({action:'save_projects', projects: projects.map(p=>{
-      const ca = p.customer || {};
-      const coTotal = (ca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0);
-      const allowB = (ca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0);
-      const allowA = (ca.allowances||[]).reduce((s,a)=>s+(parseFloat(a.actual)||0),0);
-      const billT = (ca.billables||[]).reduce((s,b)=>s+(b.amount||0),0);
-      const contractValue = (ca.contract||0) + coTotal + (allowB - allowA) + billT;
-      return {name:p.name, color:p.color||'', contractValue, permitCount:(p.permits||[]).length};
+      const pca = p.customer || {};
+      const coTotal = (pca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0);
+      const allowB = (pca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0);
+      const allowA = (pca.allowances||[]).reduce((s,a)=>s+(parseFloat(a.actual)||0),0);
+      const billT = (pca.billables||[]).reduce((s,b)=>s+(b.amount||0),0);
+      const contractValue = (pca.contract||0) + coTotal + (allowB - allowA) + billT;
+      return {name:p.name, color:p.color||'', contractValue, permits: p.permits||[]};
     })});
-    // Push transactions
+    // Push transactions del proyecto activo
     await postToSheet({action:'bulk', project:activeProject, rows:tx||[]});
-    // Push customer accounting
+    // Push customer accounting del proyecto activo
     if(ca) await postToSheet({action:'save_customer', project:activeProject, customer:ca});
-    // Push permits
-    const permits = getPermits();
-    if(permits) await postToSheet({action:'save_permits', project:activeProject, permits});
     setSyncStatus('live');
-    showToast(`✅ Pushed ${(tx||[]).length} transactions + Customer Accounting to Sheets!`,'success');
+    showToast(`✅ Pushed ${(tx||[]).length} transactions + all projects to Sheets!`,'success');
   }catch(e){
     setSyncStatus('off');
     showToast('❌ Push failed. Check connection.','error');
@@ -2952,7 +2959,18 @@ function mobileNav(view){
 <div class="modal-overlay" id="proj-del-modal" onclick="if(event.target===this)closeModal('proj-del-modal')">
   <div class="modal">
     <div class="modal-title">🗑 Delete Project?</div>
-    <div class="modal-body">Are you sure you want to delete <strong id="proj-del-name"></strong>? All transactions, permits, and data will be permanently removed.</div>
+    <div class="modal-body">
+      Are you sure you want to delete <strong id="proj-del-name"></strong>? All transactions, permits, and data will be permanently removed.
+      <div id="proj-del-sheets-opt" style="display:none;margin-top:14px;padding:12px;background:var(--navy-faint);border-radius:8px;border:1px solid var(--border);">
+        <div style="font-size:0.8rem;font-weight:700;color:var(--navy);margin-bottom:8px;">🗂 Also delete from Google Sheets?</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;cursor:pointer;">
+          <input type="radio" name="del-sheets" value="yes" id="del-sheets-yes"> Delete all sheets for this project
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;cursor:pointer;margin-top:6px;">
+          <input type="radio" name="del-sheets" value="no" id="del-sheets-no" checked> Keep Sheets data
+        </label>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('proj-del-modal')">Cancel</button>
       <button class="btn btn-primary" style="background:var(--red);border-color:var(--red);" onclick="confirmDeleteProject()">Delete</button>
