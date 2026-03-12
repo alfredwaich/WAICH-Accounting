@@ -432,7 +432,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
 }
 
 
-@media (pointer: coarse) and (max-width: 900px) {
+@media (max-width: 900px) {
   #add-form-toggle-btn { display: none !important; }
   #add-form-bar { display: none !important; }
   #nav-push { display: none !important; }
@@ -477,7 +477,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
     <div class="nav-item" onclick="showView('projects')" id="nav-projects"><span class="nav-icon">🏗️</span> All Projects</div>
     <div class="nav-item" onclick="showView('setup')" id="nav-setup"><span class="nav-icon">⚙️</span> Google Sheets</div>
     <div class="nav-item" onclick="showView('import')" id="nav-import"><span class="nav-icon">📁</span> Import Excel</div>
-    <div class="nav-item" onclick="pushAllToSheet()" id="nav-push" style="color:#4ade80;"><span class="nav-icon">☁️</span> Push All to Sheets</div>
+    <div class="nav-item" onclick="pushAllToSheet()" id="nav-push" style="color:#4ade80;display:none;"><span class="nav-icon">☁️</span> Push All to Sheets</div>
     <div class="nav-item" onclick="pullAllFromSheet()" id="nav-pull" style="color:#60a5fa;"><span class="nav-icon">⬇️</span> Pull from Sheets</div>
   </nav>
   <div class="sync-bar">
@@ -1383,6 +1383,10 @@ function saveSheetUrl(){
   showToast('✓ Connected to Google Sheets!','success');
   setSyncStatus('live');
   checkConnBanner();
+  // Show Push button only on desktop (hidden by default)
+  if(window.innerWidth > 900){
+    const pb=$('nav-push'); if(pb) pb.style.display='';
+  }
   if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
     // Mobile = Read Only mode
     // Hide Push button
