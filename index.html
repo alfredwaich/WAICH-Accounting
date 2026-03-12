@@ -2332,35 +2332,70 @@ async function pushAllToSheet(){
 // ── PULL ALL FROM SHEETS → App ──
 async function pullAllFromSheet(){
   if(!SHEET_URL){ showToast('Connect Google Sheets first in Setup','error'); return; }
-  if(!projects.length){ showToast('No projects in app to pull into','error'); return; }
   setSyncStatus('syncing');
   showToast('⬇️ Pulling latest data from Sheets...','');
   try{
+    // Step 1: Pull project list from Sheet first (source of truth)
+    const rp = await fetch(`${SHEET_URL}?type=projects&_=${Date.now()}`);
+    const dp = await rp.json();
+    if(dp.status !== 'ok' || !dp.projects || !dp.projects.length){
+      setSyncStatus('off');
+      showToast('❌ No projects found in Sheet','error');
+      return;
+    }
+    // Step 2: For each project in Sheet, pull transactions + CA
     let totalTx = 0;
-    for(const proj of projects){
+    const freshProjects = [];
+    for(const sheetProj of dp.projects){
+      const name = sheetProj.name;
+      // Keep existing local data like color, permits, isClientPayment flags
+      const existing = projects.find(p=>p.name===name) || {};
       // Pull transactions
-      const r = await fetch(`${SHEET_URL}?project=${encodeURIComponent(proj.name)}&_=${Date.now()}`);
+      const r = await fetch(`${SHEET_URL}?project=${encodeURIComponent(name)}&_=${Date.now()}`);
       const d = await r.json();
+      let transactions = existing.transactions || [];
       if(d.status==='ok' && d.rows && d.rows.length){
-        proj.transactions = d.rows.map((row,i)=>({
-          _id: Date.now()+i+Math.random(),
-          nro: row['Nro']||i+1,
-          date: row['Date']?String(row['Date']).substring(0,10):'',
-          payee: row['Payee']||'',
-          debit: row['Debit']?parseFloat(row['Debit']):null,
-          credit: row['Credit']?parseFloat(row['Credit']):null,
-          category: row['Category']||'',
-          check: row['Check/Ref']||'',
-          bank: String(row['Bank Account']||'').trim(),
-          payment: String(row['Payment Method']||'').trim(),
-          notes: row['Notes']||''
-        }));
-        totalTx += proj.transactions.length;
+        // Preserve isClientPayment flag by matching on nro+date+amount
+        const oldTx = existing.transactions || [];
+        transactions = d.rows.map((row,i)=>{
+          const nro = row['Nro']||i+1;
+          const date = row['Date']?String(row['Date']).substring(0,10):'';
+          const credit = row['Credit']?parseFloat(row['Credit']):null;
+          // Try to find matching old tx to preserve isClientPayment
+          const match = oldTx.find(t=>t.nro==nro && t.date===date);
+          return {
+            _id: Date.now()+i+Math.random(),
+            nro, date,
+            payee: row['Payee']||'',
+            debit: row['Debit']?parseFloat(row['Debit']):null,
+            credit,
+            category: row['Category']||'',
+            check: row['Check/Ref']||'',
+            bank: String(row['Bank Account']||'').trim(),
+            payment: String(row['Payment Method']||'').trim(),
+            notes: row['Notes']||'',
+            isClientPayment: match ? (match.isClientPayment||false) : false
+          };
+        });
+        totalTx += transactions.length;
       }
       // Pull customer accounting
-      const r2 = await fetch(`${SHEET_URL}?project=${encodeURIComponent(proj.name)}&type=customer&_=${Date.now()}`);
+      const r2 = await fetch(`${SHEET_URL}?project=${encodeURIComponent(name)}&type=customer&_=${Date.now()}`);
       const d2 = await r2.json();
-      if(d2.status==='ok' && d2.customer) proj.customer = d2.customer;
+      const customer = (d2.status==='ok' && d2.customer) ? d2.customer : (existing.customer||{});
+      freshProjects.push({
+        name,
+        color: sheetProj.color || existing.color || '',
+        permits: sheetProj.permits || existing.permits || [],
+        transactions,
+        customer
+      });
+    }
+    // Replace all local projects with fresh Sheet data
+    projects = freshProjects;
+    if(activeProject && !projects.find(p=>p.name===activeProject)){
+      activeProject = projects[0]?.name || '';
+      localStorage.setItem('wc_active', activeProject);
     }
     localStorage.setItem('wc_projects', JSON.stringify(projects));
     refreshAll();
@@ -2368,7 +2403,7 @@ async function pullAllFromSheet(){
     showToast(`✅ Pulled ${totalTx} transactions across ${projects.length} projects!`,'success');
   }catch(err){
     setSyncStatus('off');
-    showToast('❌ Pull failed. Check connection.','error');
+    showToast('❌ Pull failed: ' + err.message,'error');
   }
 }
 
