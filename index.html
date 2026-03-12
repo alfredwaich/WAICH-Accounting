@@ -93,10 +93,13 @@ body{font-family:'DM Mono',monospace;background:var(--bg);color:var(--text);min-
 .nav-icon{font-size:0.85rem;width:16px;text-align:center;flex-shrink:0;}
 
 .sync-bar{padding:11px 18px;border-top:1px solid rgba(255,255,255,0.08);font-size:0.62rem;color:rgba(255,255,255,0.3);display:flex;align-items:center;gap:7px;}
-.sync-dot{width:7px;height:7px;border-radius:50%;background:#94a3b8;flex-shrink:0;}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#94a3b8;flex-shrink:0;transition:background 0.3s;}
 .sync-dot.live{background:#4ade80;animation:pd 2.5s infinite;}
-.sync-dot.syncing{background:#fbbf24;}
-@keyframes pd{0%,100%{opacity:1;}50%{opacity:0.3;}}
+.sync-dot.syncing{background:#fbbf24;animation:spin-pulse 0.8s infinite;}
+.sync-dot.pending{background:#60a5fa;animation:spin-pulse 1.2s infinite;}
+.sync-dot.error{background:#f87171;}
+@keyframes pd{0%,100%{opacity:1;}50%{opacity:0.4;}}
+@keyframes spin-pulse{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.5);opacity:0.6;}}}
 
 /* ── MAIN ── */
 .main{flex:1;display:flex;flex-direction:column;min-width:0;}
@@ -469,6 +472,7 @@ input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--na
     <div class="nav-item" onclick="showView('setup')" id="nav-setup"><span class="nav-icon">⚙️</span> Google Sheets</div>
     <div class="nav-item" onclick="showView('import')" id="nav-import"><span class="nav-icon">📁</span> Import Excel</div>
     <div class="nav-item" onclick="pushAllToSheet()" id="nav-push" style="color:#4ade80;"><span class="nav-icon">☁️</span> Push All to Sheets</div>
+    <div class="nav-item" onclick="pullAllFromSheet()" id="nav-pull" style="color:#60a5fa;"><span class="nav-icon">⬇️</span> Pull from Sheets</div>
   </nav>
   <div class="sync-bar">
     <div class="sync-dot" id="sync-dot"></div>
@@ -834,6 +838,26 @@ const err_ = e => ContentService.createTextOutput(JSON.stringify({status:'error'
             <span style="font-size:0.65rem;">Expected columns: Nro, Date, Pyee/Payee, Debit, Credit, Category, Check, Bank Account, Payment method, Notas/Notes</span></div>
           </div>
           <input type="file" id="file-input" accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none" onchange="handleFileUpload(event)">
+        </div>
+      </div>
+
+      <!-- Backup & Restore Card -->
+      <div class="card" style="margin-top:20px;">
+        <div class="card-header">
+          <div class="card-title">📦 Backup &amp; Restore</div>
+        </div>
+        <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <div style="font-size:0.78rem;color:var(--muted);line-height:1.5;">
+            Your data is saved locally and auto-synced to Sheets. Use these options for extra protection.
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm" onclick="exportFullBackupExcel(false)">⬇ Download Full Backup (.xlsx)</button>
+            <button class="btn btn-outline btn-sm" onclick="showRestorePanel()">🔄 Restore from Local Backup</button>
+          </div>
+          <div id="restore-panel" style="display:none;margin-top:8px;">
+            <div style="font-size:0.75rem;font-weight:700;color:var(--navy);margin-bottom:8px;">Available local backups (last 7 days):</div>
+            <div id="restore-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1296,6 +1320,7 @@ let sortCol = 'date', sortDir = -1;
 let page = 1, pageSize = 30;
 let selectedIds = new Set();
 let pendingDeleteId = null;
+let _undoStack = null;   // { transactions, timer } for undo delete
 let SHEET_URL = localStorage.getItem('wc_sheet_url') || '';
 
 // ════════════════════════════════════════════
@@ -1312,7 +1337,9 @@ function showToast(msg, type='', dur=2800){
 function loading(on){ $('loading-bar').style.width=on?'70%':'100%'; if(!on) setTimeout(()=>$('loading-bar').style.width='0',300); }
 function openModal(id){ $(id).classList.add('open'); }
 function closeModal(id){ $(id).classList.remove('open'); }
-function saveProjects(){ localStorage.setItem('wc_projects', JSON.stringify(projects)); _lastPushedHash = ''; }
+function saveProjects(){
+  localStorage.setItem('wc_projects', JSON.stringify(projects));
+}
 
 function getActiveTx(){
   const p = projects.find(p=>p.name===activeProject);
@@ -1330,8 +1357,14 @@ function setCatTag(cat){
 }
 
 function setSyncStatus(state){
-  $('sync-dot').className = 'sync-dot '+(state==='live'?'live':state==='syncing'?'syncing':'');
-  $('sync-label').textContent = state==='live'?'Synced with Sheets':state==='syncing'?'Syncing...':'Not connected';
+  const dot = $('sync-dot');
+  const lbl = $('sync-label');
+  dot.className = 'sync-dot ' + state;
+  if(state==='live')    { lbl.textContent = '✓ Synced'; }
+  else if(state==='syncing') { lbl.textContent = 'Syncing...'; }
+  else if(state==='pending') { lbl.textContent = 'Saving...'; }
+  else if(state==='error')   { lbl.textContent = '⚠ Sync error'; }
+  else                       { lbl.textContent = 'Not connected'; }
 }
 
 function saveSheetUrl(){
@@ -1343,6 +1376,165 @@ function saveSheetUrl(){
   showToast('✓ Connected to Google Sheets!','success');
   setSyncStatus('live');
   checkConnBanner();
+  // Run backups on startup
+  saveLocalBackup();
+  checkWeeklyBackup();
+
+  // Advertir si hay sync pendiente al cerrar
+  window.addEventListener('beforeunload', e => {
+    if(_autoSyncTimer || _syncInProgress){
+      e.preventDefault();
+      e.returnValue = 'Hay cambios sin sincronizar con Google Sheets. ¿Seguro que quieres salir?';
+      return e.returnValue;
+    }
+  });
+}
+
+// ── BACKUP SYSTEM ────────────────────────────────────────────
+
+// 1. localStorage backup — snapshot cada vez que se abre la app
+function saveLocalBackup(){
+  const now = new Date();
+  const key = 'wc_backup_' + now.toISOString().substring(0,10); // key por fecha YYYY-MM-DD
+  const existing = localStorage.getItem(key);
+  if(!existing && projects.length){
+    localStorage.setItem(key, JSON.stringify(projects));
+    // Limpiar backups de más de 7 días
+    const cutoff = new Date(now - 7*24*60*60*1000).toISOString().substring(0,10);
+    Object.keys(localStorage).filter(k=>k.startsWith('wc_backup_') && k < 'wc_backup_'+cutoff)
+      .forEach(k=>localStorage.removeItem(k));
+    console.log('📦 Local backup saved:', key);
+  }
+}
+
+function listLocalBackups(){
+  return Object.keys(localStorage)
+    .filter(k=>k.startsWith('wc_backup_'))
+    .sort().reverse()
+    .map(k=>({ date: k.replace('wc_backup_',''), data: k }));
+}
+
+function restoreFromBackup(dateKey){
+  const raw = localStorage.getItem('wc_backup_' + dateKey);
+  if(!raw){ showToast('Backup not found','error'); return; }
+  if(!confirm('Restore backup from ' + dateKey + '? This will overwrite current data.')) return;
+  projects = JSON.parse(raw);
+  localStorage.setItem('wc_projects', JSON.stringify(projects));
+  renderProjectSelect(); renderDashboard(); refreshAll();
+  showToast('✅ Restored from backup ' + dateKey, 'success');
+}
+
+// 2. Weekly auto-export to Excel — si es lunes y no se ha exportado esta semana
+function checkWeeklyBackup(){
+  const now = new Date();
+  const weekKey = 'wc_weekly_' + getWeekKey(now);
+  if(localStorage.getItem(weekKey)) return; // ya se exportó esta semana
+  if(!projects.length) return;
+  // Solo exportar si la app lleva más de 5 segundos abierta (evitar exportar en cada recarga)
+  setTimeout(()=>{
+    exportFullBackupExcel(true);
+    localStorage.setItem(weekKey, '1');
+    // Limpiar semanas anteriores
+    Object.keys(localStorage).filter(k=>k.startsWith('wc_weekly_') && k < 'wc_weekly_'+getWeekKey(now))
+      .forEach(k=>localStorage.removeItem(k));
+  }, 5000);
+}
+
+function getWeekKey(date){
+  const d = new Date(date);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay()); // inicio de semana (domingo)
+  return d.toISOString().substring(0,10);
+}
+
+function exportFullBackupExcel(silent){
+  if(!projects.length){ if(!silent) showToast('No data to export','error'); return; }
+  const wb = XLSX.utils.book_new();
+  projects.forEach(p=>{
+    // Hoja de transacciones
+    if((p.transactions||[]).length){
+      const txData = [['Nro','Date','Payee','Debit','Credit','Category','Check/Ref','Bank','Payment','Notes'],
+        ...(p.transactions||[]).map(t=>[t.nro,t.date,t.payee,t.debit||'',t.credit||'',t.category,t.check||'',t.bank||'',t.payment||'',t.notes||''])];
+      const ws = XLSX.utils.aoa_to_sheet(txData);
+      ws['!cols'] = [{wch:6},{wch:11},{wch:22},{wch:12},{wch:12},{wch:18},{wch:10},{wch:14},{wch:12},{wch:24}];
+      XLSX.utils.book_append_sheet(wb, ws, (p.name||'Project').substring(0,28));
+    }
+    // Hoja CA si existe
+    const ca = p.customer;
+    if(ca && (ca.contract || (ca.changeOrders||[]).length || (ca.draws||[]).length)){
+      const caData = [
+        ['CONTRACT SUMMARY'],
+        ['Initial Contract', ca.contract||0],
+        ['Change Orders (Approved)', (ca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0)],
+        [''],
+        ['CHANGE ORDERS','Date','Description','Status','Amount'],
+        ...(ca.changeOrders||[]).map(c=>[c.num||c.co,c.date,c.desc||c.description,c.status,c.amount]),
+        [''],
+        ['DRAWS','Date','Description','Status','Amount'],
+        ...(ca.draws||[]).map(d=>[d.num||d.draw,d.date,d.desc||d.description,d.status,d.amount]),
+      ];
+      const wsCA = XLSX.utils.aoa_to_sheet(caData);
+      XLSX.utils.book_append_sheet(wb, wsCA, (p.name||'Project').substring(0,24)+'_CA');
+    }
+  });
+  const dateStr = new Date().toISOString().substring(0,10);
+  XLSX.writeFile(wb, 'WaichConstruction_Backup_'+dateStr+'.xlsx');
+  if(!silent) showToast('✅ Full backup exported!','success');
+  else showToast('📦 Weekly backup downloaded!','success');
+}
+
+// 3. Undo delete — 10 segundos para deshacer
+let _undoDeleteData = null;
+let _undoTimer = null;
+
+function scheduleUndo(label, restoreFn){
+  // Limpiar undo anterior si existe
+  if(_undoTimer){ clearTimeout(_undoTimer); hideUndoBar(); }
+  _undoDeleteData = restoreFn;
+  $('undo-label').textContent = label + ' deleted';
+  $('undo-bar').style.display = 'flex';
+  $('undo-progress').style.width = '100%';
+  $('undo-progress').style.transition = 'none';
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(()=>{
+      $('undo-progress').style.transition = 'width 10s linear';
+      $('undo-progress').style.width = '0%';
+    });
+  });
+  _undoTimer = setTimeout(()=>{ hideUndoBar(); _undoDeleteData=null; }, 10000);
+}
+
+function executeUndo(){
+  if(!_undoDeleteData) return;
+  clearTimeout(_undoTimer);
+  _undoDeleteData(); // restore function
+  _undoDeleteData = null;
+  hideUndoBar();
+  showToast('↩ Restored!','success');
+}
+
+function hideUndoBar(){
+  $('undo-bar').style.display = 'none';
+  $('undo-progress').style.transition = 'none';
+  $('undo-progress').style.width = '100%';
+}
+
+function showRestorePanel(){
+  const panel = $('restore-panel');
+  const list = $('restore-list');
+  panel.style.display = panel.style.display==='none' ? 'block' : 'none';
+  if(panel.style.display==='none') return;
+  const backups = listLocalBackups();
+  if(!backups.length){
+    list.innerHTML = '<div style="font-size:0.75rem;color:var(--muted);">No local backups found.</div>';
+    return;
+  }
+  list.innerHTML = backups.map(b=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;
+      padding:8px 12px;background:var(--navy-faint);border-radius:6px;font-size:0.78rem;">
+      <span>📅 ${b.date}</span>
+      <button class="btn btn-outline btn-sm" onclick="restoreFromBackup('${b.date}')" style="padding:3px 10px;">Restore</button>
+    </div>`).join('');
 }
 
 function checkConnBanner(){
@@ -1679,13 +1871,17 @@ async function confirmBulkDelete(){
   const proj = projects.find(p=>p.name===activeProject);
   if(!proj) return;
   const ids = [...selectedIds];
+  const snapshot = JSON.parse(JSON.stringify(proj.transactions)); // save for undo
   proj.transactions = proj.transactions.filter(t=>!selectedIds.has(t._id));
   saveProjects();
   selectedIds.clear();
   closeModal('bulk-modal');
   applyFilters();
   renderDashboard();
-  showToast(`✓ Deleted ${ids.length} entries`,'success');
+  scheduleUndo(`${ids.length} transaction${ids.length>1?'s':''}`, ()=>{
+    const p = projects.find(x=>x.name===activeProject);
+    if(p){ p.transactions = snapshot; saveProjects(); applyFilters(); renderDashboard(); }
+  });
 
   if(SHEET_URL && activeProject){
     setSyncStatus('syncing');
@@ -1801,24 +1997,22 @@ function saveTxEdit(id){
 }
 
 function openDelModal(id){
-  pendingDeleteId=id;
-  const tx=getActiveTx().find(t=>t._id===id);
-  $('del-modal-body').textContent=tx?`Delete "${tx.payee}" — ${tx.date}?`:'Delete this entry?';
-  openModal('del-modal');
+  // Delete immediately with 10s undo (no modal needed)
+  const proj = projects.find(p=>p.name===activeProject);
+  if(!proj) return;
+  const tx = proj.transactions.find(t=>t._id===id);
+  if(!tx) return;
+  const snapshot = JSON.parse(JSON.stringify(proj.transactions));
+  proj.transactions = proj.transactions.filter(t=>t._id!==id);
+  saveProjects(); applyFilters(); renderDashboard();
+  scheduleUndo(`"${tx.payee||'Entry'}"`, ()=>{
+    const p = projects.find(x=>x.name===activeProject);
+    if(p){ p.transactions = snapshot; saveProjects(); applyFilters(); renderDashboard(); }
+  });
 }
 
 async function confirmDelete(){
-  const proj=projects.find(p=>p.name===activeProject);
-  const tx=proj.transactions.find(t=>t._id===pendingDeleteId);
-  proj.transactions=proj.transactions.filter(t=>t._id!==pendingDeleteId);
-  saveProjects(); closeModal('del-modal');
-  applyFilters(); renderDashboard();
-  showToast('Entry deleted');
-  if(SHEET_URL && tx){
-    setSyncStatus('syncing');
-    try{ await postToSheet({action:'bulk_delete', project:activeProject, ids:[String(tx.nro)]}); setSyncStatus('live'); }
-    catch(e){setSyncStatus('off');}
-  }
+  // kept for compatibility — openDelModal now handles directly
 }
 
 // ════════════════════════════════════════════
@@ -1996,392 +2190,78 @@ async function loadFromSheet(projectName){
 // ── PUSH ALL LOCAL DATA TO SHEETS ──
 async function pushAllToSheet(){
   if(!SHEET_URL){ showToast('Connect Google Sheets first in Setup','error'); return; }
-  if(!activeProject){ showToast('Select a project first','error'); return; }
-  const tx = getActiveTx();
-  const ca = getCA();
+  if(!projects.length){ showToast('No projects to push','error'); return; }
   setSyncStatus('syncing');
-  showToast('⬆️ Pushing all data to Sheets...','');
+  showToast('⬆️ Pushing all projects to Sheets...','');
   try{
-    // Push project list + permits integrados en cada proyecto
+    // Push _PROJECTS con permits
     await postToSheet({action:'save_projects', projects: projects.map(p=>{
       const pca = p.customer || {};
       const coTotal = (pca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0);
-      const allowB = (pca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0);
-      const allowA = (pca.allowances||[]).reduce((s,a)=>s+(parseFloat(a.actual)||0),0);
-      const billT = (pca.billables||[]).reduce((s,b)=>s+(b.amount||0),0);
-      const contractValue = (pca.contract||0) + coTotal + (allowB - allowA) + billT;
-      return {name:p.name, color:p.color||'', contractValue, permits: p.permits||[]};
+      const allowB  = (pca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0);
+      const allowA  = (pca.allowances||[]).reduce((s,a)=>s+(parseFloat(a.actual)||0),0);
+      const billT   = (pca.billables||[]).reduce((s,b)=>s+(b.amount||0),0);
+      const contractValue = (pca.contract||0)+coTotal+(allowB-allowA)+billT;
+      return {name:p.name, color:p.color||'', contractValue, permits:p.permits||[]};
     })});
-    // Push transactions del proyecto activo
-    await postToSheet({action:'bulk', project:activeProject, rows:tx||[]});
-    // Push customer accounting del proyecto activo
-    if(ca) await postToSheet({action:'save_customer', project:activeProject, customer:ca});
+    // Push transactions + CA de TODOS los proyectos
+    let totalTx = 0;
+    for(const p of projects){
+      await postToSheet({action:'bulk', project:p.name, rows:p.transactions||[]});
+      totalTx += (p.transactions||[]).length;
+      if(p.customer) await postToSheet({action:'save_customer', project:p.name, customer:p.customer});
+    }
     setSyncStatus('live');
-    showToast(`✅ Pushed ${(tx||[]).length} transactions + all projects to Sheets!`,'success');
-  }catch(e){
+    showToast(`✅ ${projects.length} projects · ${totalTx} transactions pushed!`,'success');
+  }catch(err){
     setSyncStatus('off');
     showToast('❌ Push failed. Check connection.','error');
   }
 }
 
-// ── VENDOR DETAIL MODAL ──
-function showVendorDetail(name){
-  const tx = getActiveTx().filter(t=>t.debit&&(t.payee||'Unknown').trim()===name);
-  const total = tx.reduce((s,t)=>s+(t.debit||0),0);
-  tx.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-  const rows = tx.map((t,i)=>`
-    <tr>
-      <td>${i+1}</td>
-      <td>${t.date||'—'}</td>
-      <td>${t.check||'—'}</td>
-      <td><span class="tag ${setCatTag(t.category)}">${t.category||'—'}</span></td>
-      <td>${t.payment||'—'}</td>
-      <td>${t.notes||'—'}</td>
-      <td style="text-align:right;font-weight:700;color:var(--red)">${fmt(t.debit)}</td>
-    </tr>`).join('');
-  $('vendor-modal-title').textContent = '💸 '+name;
-  $('vendor-modal-body').innerHTML = `
-    <div style="margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:0.8rem;color:var(--muted)">${tx.length} transactions</span>
-      <span style="font-size:1.1rem;font-weight:800;color:var(--red)">${fmtS(total)}</span>
-    </div>
-    <div style="overflow-x:auto;">
-      <table style="width:100%;font-size:0.73rem;border-collapse:collapse;">
-        <thead><tr style="background:var(--navy);color:#fff;">
-          <th style="padding:7px 8px;text-align:left">#</th>
-          <th style="padding:7px 8px;text-align:left">Date</th>
-          <th style="padding:7px 8px;text-align:left">Check/Ref</th>
-          <th style="padding:7px 8px;text-align:left">Category</th>
-          <th style="padding:7px 8px;text-align:left">Method</th>
-          <th style="padding:7px 8px;text-align:left">Notes</th>
-          <th style="padding:7px 8px;text-align:right">Amount</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr style="background:var(--navy-faint);font-weight:800;">
-          <td colspan="6" style="padding:8px;text-align:right">Total Paid to ${name}</td>
-          <td style="padding:8px;text-align:right;color:var(--red)">${fmtS(total)}</td>
-        </tr></tfoot>
-      </table>
-    </div>`;
-  openModal('vendor-modal');
+// ── PULL ALL FROM SHEETS → App ──
+async function pullAllFromSheet(){
+  if(!SHEET_URL){ showToast('Connect Google Sheets first in Setup','error'); return; }
+  if(!projects.length){ showToast('No projects in app to pull into','error'); return; }
+  setSyncStatus('syncing');
+  showToast('⬇️ Pulling latest data from Sheets...','');
+  try{
+    let totalTx = 0;
+    for(const proj of projects){
+      // Pull transactions
+      const r = await fetch(`${SHEET_URL}?project=${encodeURIComponent(proj.name)}&_=${Date.now()}`);
+      const d = await r.json();
+      if(d.status==='ok' && d.rows && d.rows.length){
+        proj.transactions = d.rows.map((row,i)=>({
+          _id: Date.now()+i+Math.random(),
+          nro: row['Nro']||i+1,
+          date: row['Date']?String(row['Date']).substring(0,10):'',
+          payee: row['Payee']||'',
+          debit: row['Debit']?parseFloat(row['Debit']):null,
+          credit: row['Credit']?parseFloat(row['Credit']):null,
+          category: row['Category']||'',
+          check: row['Check/Ref']||'',
+          bank: String(row['Bank Account']||'').trim(),
+          payment: String(row['Payment Method']||'').trim(),
+          notes: row['Notes']||''
+        }));
+        totalTx += proj.transactions.length;
+      }
+      // Pull customer accounting
+      const r2 = await fetch(`${SHEET_URL}?project=${encodeURIComponent(proj.name)}&type=customer&_=${Date.now()}`);
+      const d2 = await r2.json();
+      if(d2.status==='ok' && d2.customer) proj.customer = d2.customer;
+    }
+    localStorage.setItem('wc_projects', JSON.stringify(projects));
+    refreshAll();
+    setSyncStatus('live');
+    showToast(`✅ Pulled ${totalTx} transactions across ${projects.length} projects!`,'success');
+  }catch(err){
+    setSyncStatus('off');
+    showToast('❌ Pull failed. Check connection.','error');
+  }
 }
 
-// ════════════════════════════════════════════
-
-
-// ════════════════════════════════════════════
-function getCA(){
-  const proj = projects.find(p=>p.name===activeProject);
-  if(!proj) return null;
-  if(!proj.customer) proj.customer = { contract:0, changeOrders:[], draws:[], billables:[], allowances:[] };
-  return proj.customer;
-}
-
-function saveCA(){ saveProjects(); }
-
-function toggleSection(id){
-  const el=$(id);
-  el.style.display = el.style.display==='none' ? 'block' : 'none';
-}
-
-// Format date stored as YYYY-MM-DD → MM/DD/YYYY for display
-
-function renderCustomerAccounting(){
-  const ca = getCA();
-  if(!ca){ $('view-customer').innerHTML='<div class="empty-state"><div class="empty-icon">🏗️</div><div class="empty-text">Select or create a project first.</div></div>'; return; }
-
-  const coTotal = ca.changeOrders.filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0);
-  // Allowance difference (positive = under budget = adds to contract value)
-  const allowBudget = ca.allowances.reduce((s,a)=>s+(a.budget||0),0);
-  const allowActual = ca.allowances.reduce((s,a)=>s+(a.actual!=null&&a.actual!==''?parseFloat(a.actual)||0:0),0);
-  const allowDiff = allowBudget - allowActual; // positive = savings (adds back), negative = overrun
-  // Billable expenses total
-  const billTotal = ca.billables.reduce((s,b)=>s+(b.amount||0),0);
-  // Total contract value = initial + approved COs + allowance diff + billable expenses
-  const totalContract = (ca.contract||0) + coTotal + allowDiff + billTotal;
-  // Draws REDUCE the balance (invoiced TO client)
-  const invoiced = ca.draws.reduce((s,d)=>s+(d.amount||0),0);
-  const balanceDue = totalContract - invoiced;
-
-  $('ca-contract').textContent = fmtS(ca.contract||0);
-  $('ca-contract-display').textContent = fmt(ca.contract||0);
-  $('ca-co-total').textContent = fmtS(coTotal);
-  $('ca-co-n').textContent = ca.changeOrders.length+' COs';
-  $('ca-total-contract').textContent = fmtS(totalContract);
-  $('ca-invoiced').textContent = fmtS(invoiced);
-  $('ca-balance-due').textContent = fmtS(Math.abs(balanceDue));
-  $('ca-balance-due').className = 'dk-value '+(balanceDue>0?'red':'green');
-
-  // Also update dashboard KPI
-  // Address bar from permits
-  const permits = (projects.find(p=>p.name===activeProject)||{}).permits || [];
-  const addrPermit = permits.find(p=>p.address);
-  const addrBar = $('d-address-bar');
-  if(permits.length || (addrPermit && addrPermit.address)){
-    if(addrPermit) $('d-address-text').textContent = addrPermit.address;
-    $('d-p-approved').textContent = '✅ '+permits.filter(p=>p.status==='Approved').length+' Approved';
-    $('d-p-pending').textContent  = '⏳ '+permits.filter(p=>p.status==='Pending'||p.status==='In Review').length+' Pending';
-    $('d-p-closed').textContent   = '🔒 '+permits.filter(p=>p.status==='Closed').length+' Closed';
-    $('d-p-rejected').textContent = '❌ '+permits.filter(p=>p.status==='Rejected'||p.status==='Expired').length+' Rejected';
-    addrBar.style.display = 'block';
-  } else { addrBar.style.display = 'none'; }
-  if($('d-contract')) $('d-contract').textContent = fmtS(totalContract);
-
-  // Change Orders table
-  $('co-tbody').innerHTML = ca.changeOrders.length ? ca.changeOrders.map((co,i)=>`
-    <tr id="co-row-${i}">
-      <td style="font-weight:600">${co.num||'—'}</td>
-      <td>${fmtDate(co.date)}</td>
-      <td class="wrap" style="max-width:200px">${co.desc||'—'}</td>
-      <td><span class="tag ${co.status==='Approved'?'tag-client':co.status==='Pending'?'tag-cobrar':'tag-other'}">${co.status||'—'}</span></td>
-      <td style="font-weight:600;color:var(--blue)">${fmt(co.amount)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="editCO(${i})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="deleteCO(${i})" style="color:var(--red);padding:3px 7px;">✕</button></td>
-    </tr>`).join('') :
-    '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem;">No change orders yet.</td></tr>';
-
-  // Draws table — draws REDUCE balance (invoiced to client)
-  let runningBal = totalContract;
-  $('draw-tbody').innerHTML = ca.draws.length ? ca.draws.map((d,i)=>{
-    runningBal -= (d.amount||0);
-    return `<tr id="draw-row-${i}">
-      <td style="font-weight:600">${d.num||'—'}</td>
-      <td>${fmtDate(d.date)}</td>
-      <td class="wrap" style="max-width:160px">${d.desc||'—'}</td>
-      <td><span class="tag ${d.status==='Paid'?'tag-client':d.status==='Sent'?'tag-sub':'tag-cobrar'}">${d.status||'—'}</span></td>
-      <td class="amount-debit">${fmt(d.amount)}</td>
-      <td style="font-weight:600;color:${runningBal>=0?'var(--green)':'var(--red)'}">${fmt(runningBal)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="editDraw(${i})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="deleteDraw(${i})" style="color:var(--red);padding:3px 7px;">✕</button></td>
-    </tr>`;}).join('') :
-    '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem;">No draws / invoices yet.</td></tr>';
-
-  // Billables table
-  $('bill-tbody').innerHTML = ca.billables.length ? ca.billables.map((b,i)=>`
-    <tr id="bill-row-${i}">
-      <td>${fmtDate(b.date)}</td>
-      <td class="wrap">${b.desc||'—'}</td>
-      <td><span class="tag ${b.billed==='Yes'?'tag-client':b.billed==='No'?'tag-other':'tag-cobrar'}">${b.billed||'—'}</span></td>
-      <td style="font-weight:600">${fmt(b.amount)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="editBillable(${i})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="deleteBillable(${i})" style="color:var(--red);padding:3px 7px;">✕</button></td>
-    </tr>`).join('') :
-    '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem;">No billable expenses yet.</td></tr>';
-
-  // Allowances table
-  const allowTotal = ca.allowances.reduce((s,a)=>s+(a.budget||0),0);
-  const actualTotal = ca.allowances.reduce((s,a)=>s+(a.actual||0),0);
-  const diffTotal = allowTotal - actualTotal;
-
-  $('allow-tbody').innerHTML = ca.allowances.length ? ca.allowances.map((a,i)=>{
-    const diff = (a.budget||0)-(a.actual||0);
-    return `<tr id="allow-row-${i}">
-      <td style="font-weight:600">${a.desc||a.item||'—'}</td>
-      <td>${fmt(a.budget)}</td>
-      <td>${a.actual!=null&&a.actual!==''?fmt(a.actual):'<span style="color:var(--muted)">—</span>'}</td>
-      <td style="font-weight:700;color:${diff>=0?'var(--green)':'var(--red)'}">${a.actual!=null&&a.actual!==''?(diff>=0?'+':'')+fmt(diff):'—'}</td>
-      <td style="font-size:0.75rem;color:var(--muted);max-width:160px;">${a.notes||''}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="editAllowance(${i})" style="padding:3px 7px;">✎</button> <button class="btn btn-ghost btn-sm" onclick="deleteAllowance(${i})" style="color:var(--red);padding:3px 7px;">✕</button></td>
-    </tr>`;}).join('') :
-    '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem;">No allowance items yet.</td></tr>';
-
-  $('allow-tfoot').innerHTML = ca.allowances.length ? `
-    <tr style="background:var(--navy);color:#fff;font-weight:700;">
-      <td style="padding:9px 12px;">TOTAL</td>
-      <td style="padding:9px 12px;">${fmt(allowTotal)}</td>
-      <td style="padding:9px 12px;">${fmt(actualTotal)}</td>
-      <td style="padding:9px 12px;color:${diffTotal>=0?'#86efac':'#fca5a5'}">${diffTotal>=0?'+':''}${fmt(diffTotal)}</td>
-      <td></td>
-    </tr>` : '';
-}
-
-function saveContractAmount(){
-  const ca=getCA(); if(!ca) return;
-  const val = parseFloat($('ca-contract-input').value);
-  if(isNaN(val)||val<0){ showToast('Enter a valid amount','error'); return; }
-  ca.contract = val; saveCA();
-  toggleSection('ca-contract-form');
-  renderCustomerAccounting();
-  showToast('✓ Contract amount saved!','success');
-}
-
-function addChangeOrder(){
-  const ca=getCA(); if(!ca) return;
-  const num=$('co-num').value.trim(), desc=$('co-desc').value.trim();
-  const amount=parseFloat($('co-amount').value), date=$('co-date').value;
-  if(!num||!desc||isNaN(amount)||amount<=0){ showToast('Fill in all required fields','error'); return; }
-  ca.changeOrders.push({ num, date, desc, amount, status:$('co-status').value||'Approved' });
-  saveCA(); toggleSection('co-form');
-  ['co-num','co-desc','co-amount','co-status'].forEach(id=>$(id).value='');
-  renderCustomerAccounting();
-  showToast('✓ Change order added!','success');
-}
-
-function deleteCO(i){ const ca=getCA(); ca.changeOrders.splice(i,1); saveCA(); renderCustomerAccounting(); }
-
-// ── EDIT FUNCTIONS (replace row with inline form) ──
-function editCO(i){
-  const ca=getCA(); const co=ca.changeOrders[i]; if(!co) return;
-  const row=$('co-row-'+i); if(!row) return;
-  row.innerHTML=`
-    <td><input class="form-input" id="eco-num-${i}" value="${co.num||''}" style="width:70px;padding:4px 6px;"></td>
-    <td><input type="date" class="form-input" id="eco-date-${i}" value="${co.date||''}" style="width:120px;padding:4px 6px;"></td>
-    <td><input class="form-input" id="eco-desc-${i}" value="${co.desc||''}" style="width:160px;padding:4px 6px;"></td>
-    <td><input list="dl-co-status" class="form-input" id="eco-status-${i}" value="${co.status||''}" style="width:90px;padding:4px 6px;"></td>
-    <td><input type="number" class="form-input" id="eco-amount-${i}" value="${co.amount||''}" step="0.01" style="width:90px;padding:4px 6px;"></td>
-    <td><button class="btn btn-primary btn-sm" onclick="saveCO(${i})" style="margin-right:4px;">✓</button><button class="btn btn-outline btn-sm" onclick="renderCustomerAccounting()">✕</button></td>`;
-}
-function saveCO(i){
-  const ca=getCA();
-  const num=$('eco-num-'+i).value.trim(), desc=$('eco-desc-'+i).value.trim();
-  const amount=parseFloat($('eco-amount-'+i).value), date=$('eco-date-'+i).value, status=$('eco-status-'+i).value;
-  if(!num||!desc||isNaN(amount)){ showToast('Fill in required fields','error'); return; }
-  ca.changeOrders[i]={num,date,desc,amount,status:status||'Approved'};
-  saveCA(); renderCustomerAccounting(); showToast('✓ Change order updated!','success');
-}
-
-function editDraw(i){
-  const ca=getCA(); const d=ca.draws[i]; if(!d) return;
-  const row=$('draw-row-'+i); if(!row) return;
-  row.innerHTML=`
-    <td><input class="form-input" id="edr-num-${i}" value="${d.num||''}" style="width:70px;padding:4px 6px;"></td>
-    <td><input type="date" class="form-input" id="edr-date-${i}" value="${d.date||''}" style="width:120px;padding:4px 6px;"></td>
-    <td><input class="form-input" id="edr-desc-${i}" value="${d.desc||''}" style="width:140px;padding:4px 6px;"></td>
-    <td><input list="dl-draw-status" class="form-input" id="edr-status-${i}" value="${d.status||''}" style="width:80px;padding:4px 6px;"></td>
-    <td><input type="number" class="form-input" id="edr-amount-${i}" value="${d.amount||''}" step="0.01" style="width:90px;padding:4px 6px;"></td>
-    <td></td>
-    <td><button class="btn btn-primary btn-sm" onclick="saveDraw(${i})" style="margin-right:4px;">✓</button><button class="btn btn-outline btn-sm" onclick="renderCustomerAccounting()">✕</button></td>`;
-}
-function saveDraw(i){
-  const ca=getCA();
-  const num=$('edr-num-'+i).value.trim(), desc=$('edr-desc-'+i).value.trim();
-  const amount=parseFloat($('edr-amount-'+i).value), date=$('edr-date-'+i).value, status=$('edr-status-'+i).value;
-  if(!num||isNaN(amount)){ showToast('Fill in required fields','error'); return; }
-  ca.draws[i]={num,date,desc,amount,status:status||'Sent'};
-  saveCA(); renderCustomerAccounting(); showToast('✓ Draw updated!','success');
-}
-
-function editBillable(i){
-  const ca=getCA(); const b=ca.billables[i]; if(!b) return;
-  const row=$('bill-row-'+i); if(!row) return;
-  row.innerHTML=`
-    <td><input type="date" class="form-input" id="ebl-date-${i}" value="${b.date||''}" style="width:120px;padding:4px 6px;"></td>
-    <td><input class="form-input" id="ebl-desc-${i}" value="${b.desc||''}" style="width:180px;padding:4px 6px;"></td>
-    <td><input list="dl-billed" class="form-input" id="ebl-billed-${i}" value="${b.billed||''}" style="width:80px;padding:4px 6px;"></td>
-    <td><input type="number" class="form-input" id="ebl-amount-${i}" value="${b.amount||''}" step="0.01" style="width:90px;padding:4px 6px;"></td>
-    <td><button class="btn btn-primary btn-sm" onclick="saveBillable(${i})" style="margin-right:4px;">✓</button><button class="btn btn-outline btn-sm" onclick="renderCustomerAccounting()">✕</button></td>`;
-}
-function saveBillable(i){
-  const ca=getCA();
-  const desc=$('ebl-desc-'+i).value.trim(), amount=parseFloat($('ebl-amount-'+i).value);
-  const date=$('ebl-date-'+i).value, billed=$('ebl-billed-'+i).value;
-  if(!desc||isNaN(amount)){ showToast('Fill in required fields','error'); return; }
-  ca.billables[i]={date,desc,amount,billed:billed||'Pending'};
-  saveCA(); renderCustomerAccounting(); showToast('✓ Billable updated!','success');
-}
-
-function editAllowance(i){
-  const ca=getCA(); const a=ca.allowances[i]; if(!a) return;
-  const row=$('allow-row-'+i); if(!row) return;
-  row.innerHTML=`
-    <td><input class="form-input" id="eal-desc-${i}" value="${a.desc||a.item||''}" style="width:200px;padding:4px 6px;"></td>
-    <td><input type="number" class="form-input" id="eal-budget-${i}" value="${a.budget||''}" step="0.01" style="width:100px;padding:4px 6px;"></td>
-    <td><input type="number" class="form-input" id="eal-actual-${i}" value="${a.actual!=null?a.actual:''}" step="0.01" placeholder="—" style="width:100px;padding:4px 6px;"></td>
-    <td>—</td>
-    <td><input class="form-input" id="eal-notes-${i}" value="${(a.notes||'').replace(/"/g,'&quot;')}" placeholder="Notes..." style="width:140px;padding:4px 6px;"></td>
-    <td><button class="btn btn-primary btn-sm" onclick="saveAllowance(${i})" style="margin-right:4px;">✓</button><button class="btn btn-outline btn-sm" onclick="renderCustomerAccounting()">✕</button></td>`;
-}
-function saveAllowance(i){
-  const ca=getCA();
-  const desc=$('eal-desc-'+i).value.trim(), budget=parseFloat($('eal-budget-'+i).value);
-  const actualRaw=$('eal-actual-'+i).value;
-  const actual=actualRaw!==''?parseFloat(actualRaw):null;
-  const notes=($('eal-notes-'+i)?$('eal-notes-'+i).value.trim():'');
-  if(!desc||isNaN(budget)){ showToast('Fill in required fields','error'); return; }
-  ca.allowances[i]={desc,budget,actual,notes};
-  saveCA(); renderCustomerAccounting(); showToast('✓ Allowance updated!','success');
-}
-
-function addDraw(){
-  const ca=getCA(); if(!ca) return;
-  const num=$('draw-num').value.trim(), desc=$('draw-desc').value.trim();
-  const amount=parseFloat($('draw-amount').value), date=$('draw-date').value;
-  if(!num||isNaN(amount)||amount<=0){ showToast('Fill in Draw # and Amount','error'); return; }
-  ca.draws.push({ num, date, desc, amount, status:$('draw-status').value||'Sent' });
-  saveCA(); toggleSection('draw-form');
-  ['draw-num','draw-desc','draw-amount','draw-status'].forEach(id=>$(id).value='');
-  renderCustomerAccounting();
-  showToast('✓ Draw added!','success');
-}
-
-function deleteDraw(i){ const ca=getCA(); ca.draws.splice(i,1); saveCA(); renderCustomerAccounting(); }
-
-function addBillable(){
-  const ca=getCA(); if(!ca) return;
-  const desc=$('bill-desc').value.trim(), amount=parseFloat($('bill-amount').value), date=$('bill-date').value;
-  if(!desc||isNaN(amount)||amount<=0){ showToast('Fill in Description and Amount','error'); return; }
-  ca.billables.push({ date, desc, amount, billed:$('bill-billed').value||'Pending' });
-  saveCA(); toggleSection('bill-form');
-  ['bill-desc','bill-amount','bill-billed'].forEach(id=>$(id).value='');
-  renderCustomerAccounting();
-  showToast('✓ Billable expense added!','success');
-}
-
-function deleteBillable(i){ const ca=getCA(); ca.billables.splice(i,1); saveCA(); renderCustomerAccounting(); }
-
-function addAllowance(){
-  const ca=getCA(); if(!ca) return;
-  const desc=$('allow-desc').value.trim(), budget=parseFloat($('allow-budget').value);
-  const actual=$('allow-actual').value!==''?parseFloat($('allow-actual').value):null;
-  const notes=$('allow-notes').value.trim();
-  if(!desc||isNaN(budget)||budget<0){ showToast('Fill in Description and Allowance','error'); return; }
-  ca.allowances.push({ desc, budget, actual, notes });
-  saveCA(); toggleSection('allow-form');
-  ['allow-desc','allow-budget','allow-actual','allow-notes'].forEach(id=>$(id).value='');
-  renderCustomerAccounting();
-  showToast('✓ Allowance item added!','success');
-}
-
-function deleteAllowance(i){ const ca=getCA(); ca.allowances.splice(i,1); saveCA(); renderCustomerAccounting(); }
-
-function exportAllowancesExcel(){
-  const ca=getCA(); if(!ca||!ca.allowances.length){ showToast('No allowance data to export','error'); return; }
-  const wb=XLSX.utils.book_new();
-
-  // Allowances sheet
-  const aData=[['Item / Description','Allowance Allocated','Real Cost','Difference'],
-    ...ca.allowances.map(a=>{ const d=(a.budget||0)-(a.actual||0); const name=a.desc||a.item||'—'; return [name,a.budget||0,a.actual||'',a.actual!=null?d:'']; }),
-    ['TOTAL', ca.allowances.reduce((s,a)=>s+(a.budget||0),0), ca.allowances.reduce((s,a)=>s+(a.actual||0),0), ca.allowances.reduce((s,a)=>s+(a.budget||0),0)-ca.allowances.reduce((s,a)=>s+(a.actual||0),0)]
-  ];
-  const ws1=XLSX.utils.aoa_to_sheet(aData);
-  ws1['!cols']=[{wch:35},{wch:20},{wch:20},{wch:18}];
-  XLSX.utils.book_append_sheet(wb,ws1,'Allowances');
-
-  // Change Orders sheet
-  const coData=[['CO #','Date','Description','Status','Amount'],...(ca.changeOrders.map(c=>[c.num,c.date,c.desc,c.status,c.amount]))];
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(coData),'Change Orders');
-
-  // Draws sheet
-  const drawData=[['Draw #','Date','Description','Status','Amount Invoiced'],...(ca.draws.map(d=>[d.num,d.date,d.desc,d.status,d.amount]))];
-  const totalInvoiced=ca.draws.reduce((s,d)=>s+(d.amount||0),0);
-  drawData.push(['','','','TOTAL',totalInvoiced]);
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(drawData),'Draws');
-
-  // Summary sheet
-  const coTotal=ca.changeOrders.filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0);
-  const totalContract=(ca.contract||0)+coTotal;
-  const invoiced=ca.draws.reduce((s,d)=>s+(d.amount||0),0);
-  const sumData=[
-    ['WAICH CONSTRUCTION — Customer Accounting'],['Project:',activeProject||''],[''],
-    ['Initial Contract',ca.contract||0],['Change Orders (Approved)',coTotal],['Total Contract Value',totalContract],[''],
-    ['Total Invoiced',invoiced],['Balance Due',totalContract-invoiced]
-  ];
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sumData),'Summary');
-
-  XLSX.writeFile(wb,`${(activeProject||'Project').replace(/\s+/g,'_')}_CustomerAccounting.xlsx`);
-  showToast('✓ Excel exported!','success');
-}
-
-// ════════════════════════════════════════════
-function handleDrop(e){ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) processFile(f); }
-function handleFileUpload(e){ const f=e.target.files[0]; if(f) processFile(f); }
 
 async function processFile(file){
   const reader=new FileReader();
@@ -2847,7 +2727,11 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(activeProject && !projects.find(p=>p.name===activeProject)) activeProject='';
   renderDashboard();
   // Set initial sync status based on saved URL
-  if(SHEET_URL){ setSyncStatus('live'); } else { setSyncStatus('off'); }
+  if(SHEET_URL){
+    setSyncStatus('live');
+  } else {
+    setSyncStatus('off');
+  }
   checkConnBanner();
   // Auto-load from Sheets on startup if connected
   if(SHEET_URL){
@@ -2912,6 +2796,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   <button class="mn-item" onclick="pushAllToSheet()" style="color:#4ade80;">
     <span class="mn-icon">☁️</span>
     <span>Push</span>
+  </button>
+  <button class="mn-item" onclick="pullAllFromSheet()" style="color:#60a5fa;">
+    <span class="mn-icon">⬇️</span>
+    <span>Pull</span>
   </button>
   <button class="mn-item" onclick="mobileNav('setup')" id="mn-setup">
     <span class="mn-icon">⚙️</span>
@@ -2978,5 +2866,17 @@ function mobileNav(view){
   </div>
 </div>
 
+  <!-- ══ UNDO BAR ══ -->
+  <div id="undo-bar" style="display:none;position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
+    background:var(--navy);color:#fff;border-radius:10px;padding:11px 18px;
+    display:none;align-items:center;gap:14px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3);
+    min-width:260px;max-width:90vw;font-size:0.82rem;">
+    <span id="undo-label">Item deleted</span>
+    <button onclick="executeUndo()" style="background:#4ade80;color:#14532d;border:none;border-radius:6px;
+      padding:5px 14px;font-weight:700;cursor:pointer;font-size:0.8rem;white-space:nowrap;">↩ Undo</button>
+    <button onclick="hideUndoBar()" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:1rem;padding:0 4px;">✕</button>
+    <div id="undo-progress" style="position:absolute;bottom:0;left:0;height:3px;
+      background:#4ade80;border-radius:0 0 10px 10px;width:100%;"></div>
+  </div>
 </body>
 </html>
