@@ -2403,7 +2403,9 @@ async function pullAllFromSheet(){
     showToast(`✅ Pulled ${totalTx} transactions across ${projects.length} projects!`,'success');
   }catch(err){
     setSyncStatus('off');
-    showToast('❌ Pull failed: ' + err.message,'error');
+    const msg = err.message || String(err);
+    showToast('❌ Pull failed: ' + msg,'error');
+    alert('Pull error detail:\n' + msg + '\n\nURL: ' + (SHEET_URL||'NONE').substring(0,60));
   }
 }
 
