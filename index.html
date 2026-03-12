@@ -1725,15 +1725,14 @@ function showView(v){
 // ════════════════════════════════════════════
 function renderDashboard(){
   const tx = getActiveTx();
-  // Credits: entries with credit field OR category is 'Client payment'
-  const creditTx = tx.filter(t=>t.credit || (t.category||'').toLowerCase().includes('client payment'));
-  const debitTx  = tx.filter(t=>t.debit  && !(t.category||'').toLowerCase().includes('client payment'));
-  const credits = creditTx.reduce((s,t)=>s+(t.credit||t.debit||0),0);
-  const debits  = debitTx.reduce((s,t)=>s+(t.debit||0),0);
-  const balance = credits - debits;
+  const debitTx  = tx.filter(t=>t.debit);
+  const clientPmtTx = tx.filter(t=>t.credit && t.isClientPayment);
+  const debits   = debitTx.reduce((s,t)=>s+(t.debit||0),0);
+  const clientPaid = clientPmtTx.reduce((s,t)=>s+(t.credit||0),0);
+  const balance  = clientPaid - debits;
 
-  $('d-credits').textContent = fmtS(credits);
-  $('d-credits-n').textContent = creditTx.length+' payments';
+  $('d-credits').textContent = fmtS(clientPaid);
+  $('d-credits-n').textContent = clientPmtTx.length+(clientPmtTx.length===1?' payment':' payments')+' marked';
   $('d-debits').textContent = fmtS(debits);
   $('d-debits-n').textContent = debitTx.length+' expenses';
   $('d-balance').textContent = fmtS(Math.abs(balance));
@@ -1741,51 +1740,50 @@ function renderDashboard(){
 
   // Contract value from Customer Accounting
   const ca = getCA();
-  const coT = ca ? ca.changeOrders.filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
-  const allowB = ca ? ca.allowances.reduce((s,a)=>s+(a.budget||0),0) : 0;
-  const allowA = ca ? ca.allowances.reduce((s,a)=>s+(a.actual!=null&&a.actual!==''?parseFloat(a.actual)||0:0),0) : 0;
-  const billT = ca ? ca.billables.reduce((s,b)=>s+(b.amount||0),0) : 0;
+  const coT    = ca ? (ca.changeOrders||[]).filter(c=>c.status==='Approved').reduce((s,c)=>s+(c.amount||0),0) : 0;
+  const allowB = ca ? (ca.allowances||[]).reduce((s,a)=>s+(a.budget||0),0) : 0;
+  const allowA = ca ? (ca.allowances||[]).reduce((s,a)=>s+(a.actual!=null&&a.actual!==''?parseFloat(a.actual)||0:0),0) : 0;
+  const billT  = ca ? (ca.billables||[]).reduce((s,b)=>s+(b.amount||0),0) : 0;
   const totalContractVal = ca ? (ca.contract||0) + coT + (allowB - allowA) + billT : 0;
   if($('d-contract')) $('d-contract').textContent = fmtS(totalContractVal);
   if($('d-contract-sub')) $('d-contract-sub').textContent = totalContractVal>0 ? 'initial + COs + allowances + billables' : 'Set in Customer Accounting';
 
-    // ── Bar 1: Spent vs Received ──
-  const svr_total = Math.max(debits, credits, 1);
-  const spentPct = Math.min((debits  / svr_total) * 100, 100);
-  const recvPct  = Math.min((credits / svr_total) * 100, 100);
-  $('prog-spent-bar').style.width = spentPct.toFixed(1) + '%';
-  $('prog-recv-bar').style.width  = recvPct.toFixed(1)  + '%';
-  $('prog-spent-pct').textContent = spentPct > 10 ? spentPct.toFixed(1) + '%' : '';
-  $('prog-spent-label').textContent = fmtS(debits) + ' spent \u00a0·\u00a0 ' + fmtS(credits) + ' received';
-  $('prog-spent-sub').textContent = fmtS(debits) + ' spent';
-  $('prog-recv-sub').textContent  = fmtS(credits) + ' received';
+  // Bar 1: Spent vs Received
+  const svr_total = Math.max(debits, clientPaid, 1);
+  const spentPct  = Math.min((debits/svr_total)*100, 100);
+  const recvPct   = Math.min((clientPaid/svr_total)*100, 100);
+  $('prog-spent-bar').style.width = spentPct.toFixed(1)+'%';
+  $('prog-recv-bar').style.width  = recvPct.toFixed(1)+'%';
+  $('prog-spent-pct').textContent = spentPct>10 ? spentPct.toFixed(1)+'%' : '';
+  $('prog-spent-label').textContent = fmtS(debits)+' spent  ·  '+fmtS(clientPaid)+' received';
+  $('prog-spent-sub').textContent = fmtS(debits)+' spent';
+  $('prog-recv-sub').textContent  = fmtS(clientPaid)+' received from client';
 
-  // ── Bar 2: Received vs Total Contract ──
-  const recvContractPct = totalContractVal > 0 ? Math.min((credits / totalContractVal) * 100, 100) : 0;
-  $('prog-recv-contract-bar').style.width = recvContractPct.toFixed(1) + '%';
-  $('prog-recv-pct').textContent = recvContractPct > 8 ? recvContractPct.toFixed(1) + '%' : '';
-  $('prog-recv-label').textContent = fmtS(credits) + ' of ' + fmtS(totalContractVal);
-  $('prog-recv-contract-sub').textContent = totalContractVal > 0
-    ? `${recvContractPct.toFixed(1)}% collected — ${fmtS(totalContractVal - credits)} pending`
+  // Bar 2: Received vs Total Contract
+  const recvContractPct = totalContractVal>0 ? Math.min((clientPaid/totalContractVal)*100,100) : 0;
+  $('prog-recv-contract-bar').style.width = recvContractPct.toFixed(1)+'%';
+  $('prog-recv-pct').textContent = recvContractPct>8 ? recvContractPct.toFixed(1)+'%' : '';
+  $('prog-recv-label').textContent = fmtS(clientPaid)+' of '+fmtS(totalContractVal);
+  $('prog-recv-contract-sub').textContent = totalContractVal>0
+    ? recvContractPct.toFixed(1)+'% collected — '+fmtS(totalContractVal-clientPaid)+' pending'
     : 'Set Total Contract Value in Customer Accounting';
-  // Mismatch warning
+
+  // Mismatch warning: CA draws vs transactions marked as client payment
   const caDraws = ca ? (ca.draws||[]).reduce((s,d)=>s+(d.amount||0),0) : 0;
-  const txClientPaid = getActiveTx().filter(t=>t.credit&&t.isClientPayment).reduce((s,t)=>s+(t.credit||0),0);
   const mm = $('d-credits-mismatch');
   if(mm){
-    if(caDraws===0 && txClientPaid===0){ mm.style.display='none'; }
-    else if(Math.abs(caDraws - txClientPaid) > 0.01){
+    if(caDraws===0 && clientPaid===0){ mm.style.display='none'; }
+    else if(Math.abs(caDraws-clientPaid)>0.01){
       mm.style.display='block';
-      mm.style.cssText += ';background:#fef3c7;color:#b45309;padding:3px 7px;border-radius:4px;';
+      mm.style.background='#fef3c7'; mm.style.color='#b45309';
       mm.textContent='⚠️ CA draws vs transactions mismatch — review';
     } else {
       mm.style.display='block';
-      mm.style.cssText += ';background:#dcfce7;color:#166534;padding:3px 7px;border-radius:4px;';
+      mm.style.background='#dcfce7'; mm.style.color='#166534';
       mm.textContent='✅ CA & transactions in sync';
     }
   }
 }
-
 
 function toggleAccordion(id, btn){
   const el=$(id);
