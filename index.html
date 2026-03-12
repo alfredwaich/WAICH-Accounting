@@ -1383,6 +1383,11 @@ function saveSheetUrl(){
   showToast('✓ Connected to Google Sheets!','success');
   setSyncStatus('live');
   checkConnBanner();
+  // Hide Push on mobile to prevent accidental overwrites
+  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
+    const pushBtn = $('nav-push');
+    if(pushBtn) pushBtn.style.display = 'none';
+  }
   // Run backups on startup
   saveLocalBackup();
   checkWeeklyBackup();
